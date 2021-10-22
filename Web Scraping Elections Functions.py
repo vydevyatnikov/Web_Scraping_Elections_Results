@@ -27,10 +27,10 @@ def convert_party_names(data_frame, column_with_names):
     keys = list(aliases_dictionary.keys())
     names = data_frame[column_with_names]
     index_of_neuchtennyh_row = [
-        i for i, z in enumerate(names) if "не учтенных при получении" in z or "неучтенных при получении" in z or
+        i for i, z in enumerate(names.unique()) if "не учтенных при получении" in z or "неучтенных при получении" in z or
                                           "не учтенных открепительных" in z]
     if len(index_of_neuchtennyh_row) > 0:
-        unique_names = names.unique()[max(index_of_neuchtennyh_row):]
+        unique_names = names.unique()[(max(index_of_neuchtennyh_row) + 1):]
     else:
         unique_names = names.unique()
     for name in unique_names:
@@ -279,13 +279,13 @@ def region_elections(link, dates, conditions, driver, what_to_extract):
         menu_options = driver.find_elements_by_xpath("//tbody/tr[@class='trReport']/td/a")
         # menu_options_text = [el.text for el in menu_options]
         if what_to_extract["maj_data"]:  # call for another function (maj case or prop case or smth)
-            maj_data = maj_case(driver)
+            maj_data = maj_case(driver, what_to_extract)
             if maj_data is not None:
                 maj_data["year"] = pd.Series(repeat(year, len(maj_data.iloc[:, 0])))
                 maj_data["name_of_elections"] = pd.Series(repeat(vibory_texts[i], len(maj_data.iloc[:, 0])))
                 result_dict["maj_data"] = result_dict["maj_data"].append(maj_data)
         if what_to_extract["prop_data"]:
-            prop_data = prop_case(driver)
+            prop_data = prop_case(driver, what_to_extract)
             if prop_data is not None:
                 prop_data["year"] = pd.Series(repeat(year, len(prop_data.iloc[:, 0])))
                 prop_data["name_of_elections"] = pd.Series(repeat(vibory_texts[i], len(prop_data.iloc[:, 0])))
@@ -294,7 +294,7 @@ def region_elections(link, dates, conditions, driver, what_to_extract):
     return result_dict
 
 
-def maj_case(driver):  # with uik's
+def maj_case(driver, what_to_extract):  # with uik's
     if driver.find_element_by_xpath("//div/ul/li/a[2]").text == "ЦИК России":
         region = driver.find_element_by_xpath("//div/ul/li[3]/a").text
         fed_number = "[" + [str(i + 1)
@@ -309,40 +309,50 @@ def maj_case(driver):  # with uik's
     my_click(driver.find_element_by_xpath("//a[@id='standard-reports-name']"), driver)  # independent
     try:
         my_click(driver.find_element_by_xpath("//a[@id='220-rep-dir-link']"), driver)  # dependent.
-        # Сначала нужно выбрать правильный регион
     except sel_exc.NoSuchElementException:
         input("No info about maj_case")
         return None
-    #  my_click(driver.find_element_by_xpath("//li[@class='tree-li']"), driver)
+    # В ссылка содержится информация о том, из какого меню мы их открыли, поэтому для разных целей нужны разные
+    # counties_links
     counties_links = [county.get_attribute('href') for county in driver.find_elements_by_xpath(
         path + "/a[2]"
     )]
     counties_text = [el.text for el in driver.find_elements_by_xpath(
         path + "/a[2]")]
-    data_info = pd.DataFrame()
     if len([i for i, z in enumerate(counties_text) if "Единый" in z]) > 0:
         start_point = 1
     else:
         start_point = 0
-    for i in range(start_point, len(counties_links)):
-        my_get(driver, counties_links[i])
-        cand_names = pd.Series([el.text for el in driver.find_elements_by_xpath(  # можно оптимизировать: 3 к ряду
-            "//tbody[@valign='top']/tr/td[2]"
-        )])
-        nom_subject = pd.Series([el.text for el in driver.find_elements_by_xpath(
-            "//tbody[@valign='top']/tr/td[4]"
-        )])
-        county_num = pd.Series([el.text for el in driver.find_elements_by_xpath(
-            "//tbody[@valign='top']/tr/td[5]"
-        )])
-        # county_name = driver.find_element_by_xpath("//div/ul/li/ul/li[%s]/a[2]" % str(i + 1)).text  # удалить?
-        county_name = driver.find_element_by_xpath(path + f"[{i + 1}]/a[2]").text
-        county_names = pd.Series([county_name for j in range(len(cand_names))])
-        reg_status = pd.Series([True if el.text == "зарегистрирован" else False for el in driver.find_elements_by_xpath(
-            "//tbody[@valign='top']/tr/td[7]")])
-        data_info = data_info.append(pd.DataFrame({"cand_names": cand_names, "nom_subject": nom_subject,
-                                         "county_num": county_num, "county_names": county_names,
-                                         "reg_status": reg_status}))
+    data_info = pd.DataFrame()
+    if not what_to_extract["uiks_numbers_only"]:
+        for i in range(start_point, len(counties_links)):
+            my_get(driver, counties_links[i])
+            cand_names = pd.Series([el.text for el in driver.find_elements_by_xpath(  # можно оптимизировать: 3 к ряду
+                "//tbody[@valign='top']/tr/td[2]"
+            )])
+            nom_subject = pd.Series([el.text for el in driver.find_elements_by_xpath(
+                "//tbody[@valign='top']/tr/td[4]"
+            )])
+            county_num = pd.Series([el.text for el in driver.find_elements_by_xpath(
+                "//tbody[@valign='top']/tr/td[5]"
+            )])
+            # county_name = driver.find_element_by_xpath("//div/ul/li/ul/li[%s]/a[2]" % str(i + 1)).text  # удалить?
+            county_name = driver.find_element_by_xpath(path + f"[{i + 1}]/a[2]").text
+            county_names = pd.Series([county_name for j in range(len(cand_names))])
+            reg_status = pd.Series([True if el.text == "зарегистрирован" else False for el in
+                                    driver.find_elements_by_xpath("//tbody[@valign='top']/tr/td[7]")])
+            data_info = data_info.append(pd.DataFrame({"cand_names": cand_names, "nom_subject": nom_subject,
+                                                       "county_num": county_num, "county_names": county_names,
+                                                       "reg_status": reg_status}))
+    # brand new counties links
+    my_click(driver.find_element_by_xpath("//a[@id='election-results-name']"), driver)
+    menu_options = driver.find_elements_by_xpath("//tbody/tr[@class='trReport']/td/a")
+    my_click(menu_options[[i for i, z in enumerate([el.text for el in menu_options])
+                           if "Сводная" in z and "одномандат" in z][0]], driver)
+    counties_links = [county.get_attribute('href') for county in driver.find_elements_by_xpath(
+        path + "/a[2]"
+    )]
+    # got new brand new counties links, wow
     data = pd.DataFrame()
     my_get(driver, counties_links[start_point])
     my_click(driver.find_element_by_xpath(path + f"[{start_point + 1}]/ul/li/a"), driver)
@@ -355,24 +365,33 @@ def maj_case(driver):  # with uik's
     # три строчки выше можно оптимизировать?
     for i in range(start_point, len(counties_links)):
         my_get(driver, counties_links[i])
-        my_click(driver.find_element_by_xpath("//a[@id='election-results-name']"), driver)
-        menu_options = driver.find_elements_by_xpath("//tbody/tr[@class='trReport']/td/a")
-        my_click(menu_options[[i for i, z in enumerate([el.text for el in menu_options])
-                               if "Сводная" in z and "одномандат" in z][0]], driver)
         if is_there_subcounties:
             sub_counties_links_res = [el.get_attribute("href") for el in driver.find_elements_by_xpath(
                 path + f"[{i + 1}]/ul/li/a[2]")]
             for j in sub_counties_links_res:
                 my_get(driver, j)
-                data = data.append(get_the_data(driver, "cand_names"))
+                data = data.append(get_the_data(driver, "cand_names", what_to_extract))
         else:
-            data = data.append(get_the_data(driver, "cand_names"))
-    final_dataset = pd.merge(data, data_info, on="cand_names", how="inner")
+            data = data.append(get_the_data(driver, "cand_names", what_to_extract))
+    if not what_to_extract["uiks_numbers_only"]:
+        final_dataset = pd.merge(data, data_info, on="cand_names", how="inner")
+    else:
+        final_dataset = data
     # final_dataset.to_csv("test.csv", index_label=False)
     return final_dataset
 
 
-def prop_case(driver):
+def prop_case(driver, what_to_extract):
+    my_get(driver, driver.find_element_by_xpath("//div/ul/li/a[2]").get_attribute("href"))
+    my_click(driver.find_element_by_xpath("//a[@id='election-results-name']"), driver)
+    reports_options = driver.find_elements_by_xpath("//div[@id='election-results']/table/tbody/tr/td/a")
+    reports_options_text = [el.text for el in reports_options]
+    try:
+        reports_options[[i for i, z in enumerate(reports_options_text) if
+                         "Сводная" in z and ("единому" in z or "федеральному" in z)][0]]
+    except IndexError:
+        input("No info about prop_case")
+        return None
     if driver.find_element_by_xpath("//div/ul/li/a[2]").text == "ЦИК России":
         region = driver.find_element_by_xpath("//div/ul/li[3]/a").text
         fed_number = "[" + [str(i + 1)
@@ -384,30 +403,26 @@ def prop_case(driver):
         my_get(driver, driver.find_element_by_xpath(f"//div/ul/li/ul/li{fed_number}/a[2]").get_attribute("href"))
     else:
         path = "//div/ul/li/ul/li"
-    my_click(driver.find_element_by_xpath("//a[@id='standard-reports-name']"), driver)
-    reports_options = driver.find_elements_by_xpath("//div[@id='standard-reports']/table/tbody/tr/td/a")
-    reports_options_text = [el.text for el in driver.find_elements_by_xpath(
-            "//div[@id='standard-reports']/table/tbody/tr/td/a")]
-    try:
-        reports_options[[i for i, z in enumerate(reports_options_text) if "списке" in z and "политическими" in z][0]]
-    except IndexError:
-        input("No info about prop_case")
-        return None
-    #my_get(driver, driver.find_element_by_xpath("//div/ul/li/a[2]").get_attribute("href"))
-    my_click(reports_options[[
-        i for i, z in enumerate(reports_options_text) if "Список" in z and "принимающих" in z][0]], driver)
-    data_info = pd.DataFrame({"party_names": [el.text for el in driver.find_elements_by_xpath(
-        "//table[@id='politparty2']/tbody/tr/td[2]/form/a")]})
-    # just for test
-    data_info = convert_party_names(data_info, "party_names")
-    # just for test
-    my_get(driver, driver.find_element_by_xpath("//div/ul/li/a[2]").get_attribute("href"))  # убрать?
+    my_click(driver.find_element_by_xpath("//a[@id='election-results-name']"), driver)
+    # my_get(driver, driver.find_element_by_xpath("//div/ul/li/a[2]").get_attribute("href"))
+    data_info = pd.DataFrame()
+    if not what_to_extract["uiks_numbers_only"]:
+        my_click(driver.find_element_by_xpath("//a[@id='standard-reports-name']"), driver)
+        reports_options = [i for i in
+                           driver.find_elements_by_xpath("//div[@id='standard-reports']/table/tbody/tr/td/a")]
+        reports_options_text = [el.text for el in reports_options]
+        my_click(reports_options[[
+            i for i, z in enumerate(reports_options_text) if "Список" in z and "принимающих" in z][0]], driver)
+        data_info = data_info.append(pd.DataFrame({"party_names": [el.text for el in driver.find_elements_by_xpath(
+            "//table[@id='politparty2']/tbody/tr/td[2]/form/a")]}))
+    # my_get(driver, driver.find_element_by_xpath("//div/ul/li/a[2]").get_attribute("href"))  # убрать?
     my_click(driver.find_element_by_xpath("//a[@id='election-results-name']"), driver)
     # driver.find_element_by_xpath("//a[@id='election-results-name']").click()
     menu_options = driver.find_elements_by_xpath("//div[@id='election-results']/table/tbody/tr/td/a")
     menu_options_text = [el.text for el in driver.find_elements_by_xpath(
         "//div[@id='election-results']/table/tbody/tr/td/a")]
-    my_click(menu_options[[i for i, z in enumerate(menu_options_text) if "Сводная" in z and "едином" in z][0]], driver)
+    my_click(menu_options[[i for i, z in enumerate(menu_options_text)
+                           if "Сводная" in z and ("едином" in z or "федеральному" in z)][0]], driver)
     counties_text = [el.text for el in driver.find_elements_by_xpath(
         path + "/a[2]")]
     if len([i for i, z in enumerate(counties_text) if "Единый" in z]) > 0:
@@ -431,50 +446,57 @@ def prop_case(driver):
                 path + "/ul/li/a[2]")]
             for i in sub_counties_links_res:
                 my_get(driver, i)
-                data = data.append(get_the_data(driver, "party_names"))
+                data = data.append(get_the_data(driver, "party_names", what_to_extract))
         else:
-            data = data.append(get_the_data(driver, "party_names"))
+            data = data.append(get_the_data(driver, "party_names", what_to_extract))
     # solution to party_names_problem
-    data_info = convert_party_names(data_info, "party_names")
-    data = convert_party_names(data, "party_names")
-    final_dataset = pd.merge(data, data_info, on="party_names", how="inner")
+    if not what_to_extract["uiks_numbers_only"]:
+        data_info = convert_party_names(data_info, "party_names")
+        data = convert_party_names(data, "party_names")
+        final_dataset = pd.merge(data, data_info, on="party_names", how="inner")
+    else:
+        final_dataset = data
     # final_dataset.to_csv("test.csv", index_label=False)
     return final_dataset
 
 
-def get_the_data(driver, name):
+def get_the_data(driver, name, what_to_extract):
     data = pd.DataFrame()
     smth_names = pd.Series([el.text for el in driver.find_elements_by_xpath(
         "//table[@id='fix-columns-table']/tbody/tr/td[2]")])
     for j in range(4, len(driver.find_elements_by_xpath("//table[@id='fix-columns-table']/thead/tr/th")) + 1):
+        uik_num = driver.find_element_by_xpath("//table[@id='fix-columns-table']/thead/tr/th[%s]" % j).text
+        if what_to_extract["uiks_numbers_only"]:
+            data = data.append(pd.DataFrame({"uik_num": pd.Series(uik_num)}))
+            continue
         result = pd.Series(list(map(int, [el.text for el in driver.find_elements_by_xpath(
             "//table[@id='fix-columns-table']/tbody/tr/td[%s]/nobr/b" % j)])))
-        uik_num = driver.find_element_by_xpath("//table[@id='fix-columns-table']/thead/tr/th[%s]" % j).text
         uik_nums = pd.Series([uik_num for t in range(len(result))])
         came_to_ballotbox = result[[
             y for y, z in enumerate(smth_names) if "Число бюллетеней, содержащихся в" in z or "Число бюллетеней в" in z
         ]].sum()
         num_of_registered_voters = int(result[[
             y for y, z in enumerate(smth_names) if "Число избирателей, внесенных в список" in z or
-                                                        "Число избирателей, внесенных в списки" in z
+                                                   "Число избирателей, внесенных в списки" in z
         ]])
         came_to_ballotbox = pd.Series(repeat(came_to_ballotbox, len(result)))
         num_of_registered_voters = pd.Series(repeat(num_of_registered_voters, len(result)))
         data_dict = {"x": smth_names, "votes": result, "uik": uik_nums,
-                                         "came_to_ballotbox": came_to_ballotbox,
-                                         "num_of_registered_voters": num_of_registered_voters}
+                     "came_to_ballotbox": came_to_ballotbox,
+                     "num_of_registered_voters": num_of_registered_voters}
         data = data.append(pd.DataFrame(data_dict))
-    data = data.rename(columns={"x": name})
+    if not what_to_extract["uiks_numbers_only"]:
+        data = data.rename(columns={"x": name})
     return data
 
 
 if __name__ == "__main__":
-    x = scrap_elections(regions_to_collect="Республика Алтай",
-                        start_date="01.01.2010",
-                        end_date="31.12.2010",
-                        level="Региональный",
+    x = scrap_elections(regions_to_collect="Московская область",
+                        start_date="01.01.2021",
+                        end_date="31.12.2021",
+                        level="Федеральный",
                         kind="Выборы депутата",
-                        what_to_extract={"maj_data": False, "prop_data": True},
+                        what_to_extract={"maj_data": True, "prop_data": True, "uiks_numbers_only": True},
                         type_of_elections="Основные",
                         driver_loc="C:/Users/user/Desktop/DZ/Python/Driver/geckodriver.exe",
                         output_dir="C:/Users/user/Desktop/DZ/Python/Projects/Elections")
