@@ -14,6 +14,21 @@ import pickle
 from Test import get_the_numbers
 
 
+def undo(conditions, driver):
+    input_boxes = driver.find_elements(By.XPATH, "//span[@class='select2-search select2-search--inline']")
+    for i in range(4):
+        if conditions[i] is None:
+            continue
+        my_click(input_boxes[i], driver)
+        for j in driver.find_elements_by_xpath(  # оптимизировать, чтобы не прогонять по selectoram, где value = None
+                "//span[@class='select2-container select2-container--default select2-container--open']/*/*/*/li"):
+            if j.text in conditions[i]:
+                my_click(j, driver)
+        my_click(driver.find_element_by_xpath(
+            "//div[@class='select2-link2 select2-close']/button[@class='btn btn-primary']"
+        ), driver)
+
+
 def add_alias(aliases_dictionary, name):
     alias, value = input("Name is %s, enter alias and value with comma and space between them" % name).split(", ")
     aliases_dictionary[alias] = value
@@ -55,7 +70,10 @@ def my_click(elem, driver, check_condition=True):  # add captcha num and driver
         elem.click()
         solve_captcha(driver)
     else:
-        elem.click()
+        try:
+            elem.click()
+        except sel_exc.StaleElementReferenceException:
+            return
 
 
 def my_get(driver, link):
@@ -108,8 +126,9 @@ def solve_captcha(driver):
         return
 
 
-def scrap_elections(start_date, end_date, level, what_to_extract, regions_to_collect="every", kind=None,
-                    type_of_elections=None, electoral_system=None, driver_loc=None, output_dir="C:/Users"):  # Добавить опцию all для regions
+def scrap_elections(start_date, end_date, what_to_extract, regions_to_collect="every", level=None, kind=None,
+                    type_of_elections=None, electoral_system="Смешанная - пропорциональная и мажоритарная",
+                    driver_loc=None, output_dir="C:/Users"):  # Добавить опцию all для regions
     region_link = {'Москва': "http://www.moscow-city.vybory.izbirkom.ru/region/moscow-city",
                    "Московская область": "http://www.moscow-reg.vybory.izbirkom.ru/region/moscow-reg",
                    "Республика Алтай": "http://www.altai-rep.vybory.izbirkom.ru/region/altai-rep",
@@ -199,6 +218,23 @@ def scrap_elections(start_date, end_date, level, what_to_extract, regions_to_col
                    "Чукотский АО": "http://www.chukot.vybory.izbirkom.ru/region/chukot",
                    "Ямало-Ненецкий АО": "http://www.yamal-nenetsk.vybory.izbirkom.ru/region/yamal-nenetsk",
                    }
+    full_set_of_possible_conditions = {"level": ["Административный центр", "Местное самоуправление",
+                                                 "Федеральный", "Региональный"],
+                                       "kind": ["Референдум", "Выборы на должность", "Выборы депутата",
+                                                "Отзыв депутат", "Отзыв должностного лица"],
+                                       "type_of_elections": ["Основные", "Основные повторные", "Основные отложенные",
+                                                             "Основные отдельные", "Дополнительные",
+                                                             "Дополнительные повторные", "Довыборы",
+                                                             "Повторное голосование",
+                                                             "Основные выборы и повторное голосование"],
+                                       "electoral_system": ["Мажоритарная",
+                                                            "Мажоритарная - по общерегиональному округу и по отдельным "
+                                                            "избирательным округам",
+                                                            "Мажоритарная по общенациональному округу",
+                                                            "Пропорциональная",
+                                                            "Смешанная - пропорциональная и мажоритарная",
+                                                            "Пропорциональная и мажоритраная по общенациональному "
+                                                            "округу и отдельным избирательным округам"]}
     if driver_loc is None:
         driver = Firefox()
     else:
@@ -208,20 +244,51 @@ def scrap_elections(start_date, end_date, level, what_to_extract, regions_to_col
         regions = list(region_link.keys())
     else:
         regions = regions_to_collect
+    if type(electoral_system) == str:
+        electoral_system = [electoral_system]
     try:
         dates = {"'start_date'": start_date, "'end_date'": end_date}  # двойные кавычки для @id
-        conditions = [level, kind, type_of_elections, electoral_system]
+        conditions = {"level": level, "kind": kind, "type_of_elections": type_of_elections,
+                      "electoral_system": electoral_system}
+        for i in list(conditions.keys()):
+            if conditions[i] is None:
+                conditions[i] = full_set_of_possible_conditions[i]
         if regions is not list and regions_to_collect != "every":
             regions = [regions]
         for i in regions:
-            output = region_elections(region_link[i], dates, conditions, driver, what_to_extract)  # разобраться с тем, что выдает эта функция
-            if output["maj_data"].shape[0] != 0:
-                output["maj_data"]["region"] = pd.Series(repeat(i, output["maj_data"].shape[0]))
-                final_data["maj_data"] = final_data["maj_data"].append(output["maj_data"])
-            if output["prop_data"].shape[0] != 0:
-                output["prop_data"]["region"] = pd.Series(repeat(i, output["prop_data"].shape[0]))
-                final_data["prop_data"] = final_data["prop_data"].append(output["prop_data"])
-            # add region column
+            undo_conditions = None
+            for lvl in conditions["level"]:
+                if lvl == "Федеральный":
+                    is_federal = True
+                else:
+                    is_federal = False
+                for k in conditions["kind"]:
+                    for t in conditions["type_of_elections"]:
+                        for elec_system in conditions["electoral_system"]:
+                            output = region_elections(link=region_link[i], dates=dates,
+                                                      conditions=[lvl, k, t, elec_system],
+                                                      driver=driver,
+                                                      what_to_extract=what_to_extract,
+                                                      is_federal=is_federal,
+                                                      undo_conditions=undo_conditions)  # разобраться с тем, что выдает эта функция
+                            undo_conditions = [lvl, k, t, elec_system]
+                            if output["maj_data"].shape[0] != 0:
+                                output["maj_data"]["region"] = pd.Series(repeat(i, output["maj_data"].shape[0]))
+                                output["maj_data"]["level"] = pd.Series(repeat(lvl, output["maj_data"].shape[0]))
+                                output["maj_data"]["kind"] = pd.Series(repeat(k, output["maj_data"].shape[0]))
+                                output["maj_data"]["type"] = pd.Series(repeat(t, output["maj_data"].shape[0]))
+                                output["maj_data"]["elec_system"] = pd.Series(repeat(elec_system,
+                                                                                     output["maj_data"].shape[0]))
+                                final_data["maj_data"] = final_data["maj_data"].append(output["maj_data"])
+                            if output["prop_data"].shape[0] != 0:
+                                output["prop_data"]["region"] = pd.Series(repeat(i, output["prop_data"].shape[0]))
+                                output["prop_data"]["level"] = pd.Series(repeat(lvl, output["prop_data"].shape[0]))
+                                output["prop_data"]["kind"] = pd.Series(repeat(k, output["prop_data"].shape[0]))
+                                output["prop_data"]["type"] = pd.Series(repeat(t, output["prop_data"].shape[0]))
+                                output["prop_data"]["elec_system"] = pd.Series(repeat(elec_system,
+                                                                                      output["prop_data"].shape[0]))
+                                final_data["prop_data"] = final_data["prop_data"].append(output["prop_data"])
+                            # add region column
     except Exception:
         input("Check webpage before it's closure")
         raise
@@ -237,7 +304,7 @@ def scrap_elections(start_date, end_date, level, what_to_extract, regions_to_col
                 final_data["maj_data"].to_csv(output_dir + "/" + name_of_maj_file + r".csv", index_label=False)
 
 
-def region_elections(link, dates, conditions, driver, what_to_extract):
+def region_elections(link, dates, conditions, driver, what_to_extract, is_federal, undo_conditions):
     my_get(driver, link)
     try:
         locate_page = WebDriverWait(driver, 10).until(EC.presence_of_element_located((
@@ -251,6 +318,8 @@ def region_elections(link, dates, conditions, driver, what_to_extract):
         elem = driver.find_element_by_xpath("//input[@id=%s]" % i)
         elem.clear()
         elem.send_keys(dates[i])
+    if undo_conditions is not None:
+        undo(undo_conditions, driver)
     input_boxes = driver.find_elements(By.XPATH, "//span[@class='select2-search select2-search--inline']")
     for i in range(4):
         if conditions[i] is None:
@@ -258,7 +327,7 @@ def region_elections(link, dates, conditions, driver, what_to_extract):
         my_click(input_boxes[i], driver)
         for j in driver.find_elements_by_xpath(  # оптимизировать, чтобы не прогонять по selectoram, где value = None
                 "//span[@class='select2-container select2-container--default select2-container--open']/*/*/*/li"):
-            if j.text in conditions[i]:
+            if j.text == conditions[i]:
                 my_click(j, driver)
         my_click(driver.find_element_by_xpath(
             "//div[@class='select2-link2 select2-close']/button[@class='btn btn-primary']"
@@ -279,13 +348,13 @@ def region_elections(link, dates, conditions, driver, what_to_extract):
         menu_options = driver.find_elements_by_xpath("//tbody/tr[@class='trReport']/td/a")
         # menu_options_text = [el.text for el in menu_options]
         if what_to_extract["maj_data"]:  # call for another function (maj case or prop case or smth)
-            maj_data = maj_case(driver, what_to_extract)
+            maj_data = maj_case(driver, what_to_extract, is_federal)
             if maj_data is not None:
                 maj_data["year"] = pd.Series(repeat(year, len(maj_data.iloc[:, 0])))
                 maj_data["name_of_elections"] = pd.Series(repeat(vibory_texts[i], len(maj_data.iloc[:, 0])))
                 result_dict["maj_data"] = result_dict["maj_data"].append(maj_data)
         if what_to_extract["prop_data"]:
-            prop_data = prop_case(driver, what_to_extract)
+            prop_data = prop_case(driver, what_to_extract, is_federal)
             if prop_data is not None:
                 prop_data["year"] = pd.Series(repeat(year, len(prop_data.iloc[:, 0])))
                 prop_data["name_of_elections"] = pd.Series(repeat(vibory_texts[i], len(prop_data.iloc[:, 0])))
@@ -294,8 +363,8 @@ def region_elections(link, dates, conditions, driver, what_to_extract):
     return result_dict
 
 
-def maj_case(driver, what_to_extract):  # with uik's
-    if driver.find_element_by_xpath("//div/ul/li/a[2]").text == "ЦИК России":
+def maj_case(driver, what_to_extract, is_federal):  # with uik's
+    if is_federal:
         region = driver.find_element_by_xpath("//div/ul/li[3]/a").text
         fed_number = "[" + [str(i + 1)
                             for i, z in
@@ -381,18 +450,8 @@ def maj_case(driver, what_to_extract):  # with uik's
     return final_dataset
 
 
-def prop_case(driver, what_to_extract):
-    my_get(driver, driver.find_element_by_xpath("//div/ul/li/a[2]").get_attribute("href"))
-    my_click(driver.find_element_by_xpath("//a[@id='election-results-name']"), driver)
-    reports_options = driver.find_elements_by_xpath("//div[@id='election-results']/table/tbody/tr/td/a")
-    reports_options_text = [el.text for el in reports_options]
-    try:
-        reports_options[[i for i, z in enumerate(reports_options_text) if
-                         "Сводная" in z and ("единому" in z or "федеральному" in z)][0]]
-    except IndexError:
-        input("No info about prop_case")
-        return None
-    if driver.find_element_by_xpath("//div/ul/li/a[2]").text == "ЦИК России":
+def prop_case(driver, what_to_extract, is_federal):
+    if is_federal:
         region = driver.find_element_by_xpath("//div/ul/li[3]/a").text
         fed_number = "[" + [str(i + 1)
                             for i, z in
@@ -403,6 +462,16 @@ def prop_case(driver, what_to_extract):
         my_get(driver, driver.find_element_by_xpath(f"//div/ul/li/ul/li{fed_number}/a[2]").get_attribute("href"))
     else:
         path = "//div/ul/li/ul/li"
+        my_get(driver, driver.find_element_by_xpath("//div/ul/li/a[2]").get_attribute("href"))
+    my_click(driver.find_element_by_xpath("//a[@id='election-results-name']"), driver)
+    reports_options = driver.find_elements_by_xpath("//div[@id='election-results']/table/tbody/tr/td/a")
+    reports_options_text = [el.text for el in reports_options]
+    try:
+        reports_options[[i for i, z in enumerate(reports_options_text) if
+                         "Сводная" in z and ("единому" in z or "федеральному" in z)][0]]
+    except IndexError:
+        input("No info about prop_case")
+        return None
     my_click(driver.find_element_by_xpath("//a[@id='election-results-name']"), driver)
     # my_get(driver, driver.find_element_by_xpath("//div/ul/li/a[2]").get_attribute("href"))
     data_info = pd.DataFrame()
@@ -491,12 +560,13 @@ def get_the_data(driver, name, what_to_extract):
 
 
 if __name__ == "__main__":
-    x = scrap_elections(regions_to_collect="Московская область",
-                        start_date="01.01.2021",
-                        end_date="31.12.2021",
-                        level="Федеральный",
-                        kind="Выборы депутата",
-                        what_to_extract={"maj_data": True, "prop_data": True, "uiks_numbers_only": True},
-                        type_of_elections="Основные",
+    x = scrap_elections(regions_to_collect="Республика Алтай",
+                        start_date="01.01.2010",
+                        end_date="31.12.2013",
+                        level=["Региональный"],
+                        kind=["Выборы депутата"],
+                        what_to_extract={"maj_data": True, "prop_data": True, "uiks_numbers_only": False},
+                        type_of_elections=["Основные"],
                         driver_loc="C:/Users/user/Desktop/DZ/Python/Driver/geckodriver.exe",
                         output_dir="C:/Users/user/Desktop/DZ/Python/Projects/Elections")
+# Все conditions должны быть листами
