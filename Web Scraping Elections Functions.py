@@ -12,6 +12,7 @@ from time import sleep as tms
 from itertools import compress, repeat
 import pickle
 from Test import get_the_numbers
+import traceback
 
 
 def undo(conditions, driver):
@@ -124,6 +125,22 @@ def solve_captcha(driver):
             return
     except sel_exc.NoSuchElementException:
         return
+
+
+def automatic_restart(function_name, args, err, exceptions):
+    otp = None
+    try:
+        if err >= 3:
+            for i in exceptions:
+                print(i[0].__class__)
+                traceback.print_tb(i[1])
+            raise exceptions[2][0]
+        else:
+            otp = globals()[function_name](**args)
+    except Exception as excp:
+        otp = automatic_restart(function_name, args, err+1, exceptions.append((excp, excp.__traceback__)))
+    finally:
+        return otp
 
 
 def scrap_elections(start_date, end_date, what_to_extract, regions_to_collect="every", level=None, kind=None,
@@ -265,12 +282,21 @@ def scrap_elections(start_date, end_date, what_to_extract, regions_to_collect="e
                 for k in conditions["kind"]:
                     for t in conditions["type_of_elections"]:
                         for elec_system in conditions["electoral_system"]:
-                            output = region_elections(link=region_link[i], dates=dates,
-                                                      conditions=[lvl, k, t, elec_system],
-                                                      driver=driver,
-                                                      what_to_extract=what_to_extract,
-                                                      is_federal=is_federal,
-                                                      undo_conditions=undo_conditions)  # разобраться с тем, что выдает эта функция
+                            output = automatic_restart(function_name="region_elections",
+                                                       args={"link": region_link[i],
+                                                             "dates": dates,
+                                                             "conditions": [lvl, k, t, elec_system],
+                                                             "driver": driver, "what_to_extract": what_to_extract,
+                                                             "is_federal": is_federal,
+                                                             "undo_conditions": undo_conditions},
+                                                       err=0,
+                                                       exceptions=[])
+                            #output = region_elections(link=region_link[i], dates=dates,
+                            #                          conditions=[lvl, k, t, elec_system],
+                            #                          driver=driver,
+                            #                          what_to_extract=what_to_extract,
+                            #                          is_federal=is_federal,
+                            #                          undo_conditions=undo_conditions)  # разобраться с тем, что выдает эта функция
                             undo_conditions = [lvl, k, t, elec_system]
                             if output["maj_data"].shape[0] != 0:
                                 output["maj_data"]["region"] = pd.Series(repeat(i, output["maj_data"].shape[0]))
@@ -348,13 +374,25 @@ def region_elections(link, dates, conditions, driver, what_to_extract, is_federa
         menu_options = driver.find_elements_by_xpath("//tbody/tr[@class='trReport']/td/a")
         # menu_options_text = [el.text for el in menu_options]
         if what_to_extract["maj_data"]:  # call for another function (maj case or prop case or smth)
-            maj_data = maj_case(driver, what_to_extract, is_federal)
+            maj_data = automatic_restart(function_name="maj_case",
+                                         args={"driver": driver,
+                                               "what_to_extract": what_to_extract,
+                                               "is_federal": is_federal},
+                                         err=0,
+                                         exceptions=[])
+            #maj_data = maj_case(driver, what_to_extract, is_federal)
             if maj_data is not None:
                 maj_data["year"] = pd.Series(repeat(year, len(maj_data.iloc[:, 0])))
                 maj_data["name_of_elections"] = pd.Series(repeat(vibory_texts[i], len(maj_data.iloc[:, 0])))
                 result_dict["maj_data"] = result_dict["maj_data"].append(maj_data)
         if what_to_extract["prop_data"]:
-            prop_data = prop_case(driver, what_to_extract, is_federal)
+            prop_data = automatic_restart(function_name="prop_case",
+                                          args={"driver": driver,
+                                                "what_to_extract": what_to_extract,
+                                                "is_federal": is_federal},
+                                          err=0,
+                                          exceptions=[])
+            #prop_data = prop_case(driver, what_to_extract, is_federal)
             if prop_data is not None:
                 prop_data["year"] = pd.Series(repeat(year, len(prop_data.iloc[:, 0])))
                 prop_data["name_of_elections"] = pd.Series(repeat(vibory_texts[i], len(prop_data.iloc[:, 0])))
