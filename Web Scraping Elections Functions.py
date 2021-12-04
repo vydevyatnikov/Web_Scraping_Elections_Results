@@ -6,6 +6,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import Select
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.common.keys import Keys
 import selenium.common.exceptions as sel_exc
 from selenium.webdriver.common.alert import Alert
 from time import sleep as tms
@@ -13,21 +14,22 @@ from itertools import compress, repeat
 import pickle
 from Test import get_the_numbers
 import traceback
+import re
 
 
 def undo(conditions, driver):
     input_boxes = driver.find_elements(By.XPATH, "//span[@class='select2-search select2-search--inline']")
     for i in range(4):
-        if conditions[i] is None:
+        if conditions[i] is None or conditions[i] == "not specified":
             continue
-        my_click(input_boxes[i], driver)
+        my_click(input_boxes[i], driver, wait=False)
         for j in driver.find_elements_by_xpath(  # оптимизировать, чтобы не прогонять по selectoram, где value = None
                 "//span[@class='select2-container select2-container--default select2-container--open']/*/*/*/li"):
-            if j.text in conditions[i]:
-                my_click(j, driver)
+            if j.text == conditions[i]:
+                my_click(j, driver, wait=False)
         my_click(driver.find_element_by_xpath(
             "//div[@class='select2-link2 select2-close']/button[@class='btn btn-primary']"
-        ), driver)
+        ), driver, wait=False)
 
 
 def add_alias(aliases_dictionary, name):
@@ -54,19 +56,21 @@ def convert_party_names(data_frame, column_with_names):
             continue
         alias_index = [i for i, z in enumerate(keys) if z in name.lower().translate({ord("'"): None, ord('"'): None})]
         if len(alias_index) != 0:
-            if len(alias_index) >= 2:
-                input("Two or more elements in alias_index")
-                breakpoint()
+            #if len(alias_index) >= 2:
+            #    input("Two or more elements in alias_index")
+                #breakpoint()
             alias_index = alias_index[0]
-            data_frame.loc[data_frame.party_names == name, "party_names"] = aliases_dictionary[keys[alias_index]]
+            data_frame.loc[data_frame[column_with_names] == name,
+                           column_with_names] = aliases_dictionary[keys[alias_index]]
         else:
             add_alias(aliases_dictionary, name)
             return convert_party_names(data_frame, column_with_names)
     return data_frame
 
 
-def my_click(elem, driver, check_condition=True):  # add captcha num and driver
-    tms(2)
+def my_click(elem, driver, check_condition=True, wait=True):  # add captcha num and driver
+    if wait:
+        tms(2)
     if check_condition:
         elem.click()
         solve_captcha(driver)
@@ -133,11 +137,16 @@ def automatic_restart(function_name, args, err, exceptions):
             for i in exceptions:
                 print(i[0].__class__)
                 traceback.print_tb(i[1])
+                print("_________________________________")
             raise exceptions[2][0]
         else:
             otp = globals()[function_name](**args)
     except Exception as excp:
-        otp = automatic_restart(function_name, args, err+1, exceptions.append((excp, excp.__traceback__)))
+        if err >= 3:
+            breakpoint()
+            raise excp
+        exceptions.append((excp, excp.__traceback__))
+        otp = automatic_restart(function_name, args, err+1, exceptions)
     finally:
         return otp
 
@@ -234,23 +243,17 @@ def scrap_elections(start_date, end_date, what_to_extract, regions_to_collect="e
                    "Чукотский АО": "http://www.chukot.vybory.izbirkom.ru/region/chukot",
                    "Ямало-Ненецкий АО": "http://www.yamal-nenetsk.vybory.izbirkom.ru/region/yamal-nenetsk",
                    }
-    full_set_of_possible_conditions = {"level": ["Административный центр", "Местное самоуправление",
-                                                 "Федеральный", "Региональный"],
-                                       "kind": ["Референдум", "Выборы на должность", "Выборы депутата",
-                                                "Отзыв депутат", "Отзыв должностного лица"],
-                                       "type_of_elections": ["Основные", "Основные повторные", "Основные отложенные",
-                                                             "Основные отдельные", "Дополнительные",
-                                                             "Дополнительные повторные", "Довыборы",
-                                                             "Повторное голосование",
-                                                             "Основные выборы и повторное голосование"],
-                                       "electoral_system": ["Мажоритарная",
-                                                            "Мажоритарная - по общерегиональному округу и по отдельным "
-                                                            "избирательным округам",
-                                                            "Мажоритарная по общенациональному округу",
-                                                            "Пропорциональная",
-                                                            "Смешанная - пропорциональная и мажоритарная",
-                                                            "Пропорциональная и мажоритраная по общенациональному "
-                                                            "округу и отдельным избирательным округам"]}
+    full_set_of_possible_conditions = \
+        {"level": ["Административный центр", "Местное самоуправление", "Федеральный", "Региональный"],
+         "kind": ["Референдум", "Выборы на должность", "Выборы депутата", "Отзыв депутат", "Отзыв должностного лица"],
+         "type_of_elections": ["Основные", "Основные повторные", "Основные отложенные", "Основные отдельные",
+                               "Дополнительные", "Дополнительные повторные", "Довыборы", "Повторное голосование",
+                               "Основные выборы и повторное голосование"],
+         "electoral_system": ["Мажоритарная",
+                              "Мажоритарная - по общерегиональному округу и по отдельным избирательным округам",
+                              "Мажоритарная по общерегиональному округу", "Пропорциональная",
+                              "Смешанная - пропорциональная и мажоритарная",
+                              "Пропорциональная и мажоритарная по общерегиональному округу и отдельным избирательным округам"]}
     if driver_loc is None:
         driver = Firefox()
     else:
@@ -310,8 +313,12 @@ def scrap_elections(start_date, end_date, what_to_extract, regions_to_collect="e
                                 output["prop_data"]["elec_system"] = pd.Series(repeat(elec_system,
                                                                                       output["prop_data"].shape[0]))
                                 final_data["prop_data"] = final_data["prop_data"].append(output["prop_data"])
-            final_data["maj_data"].to_csv(output_dir + "/Intermediate_results/" + i + "_maj.csv", index_label=False)
-            final_data["prop_data"].to_csv(output_dir + "/Intermediate_results/" + i + "_prop.csv", index_label=False)
+            #final_data["maj_data"].to_csv(output_dir + "/Intermediate_results/" + i + "_maj.csv", index_label=False)
+            final_data["maj_data"].to_csv("C:/Users/user/Desktop/DZ/Course_5/Курсовая/data/" + i + "_maj.csv",
+                                          index_label=False)
+            #final_data["prop_data"].to_csv(output_dir + "/Intermediate_results/" + i + "_prop.csv", index_label=False)
+            final_data["prop_data"].to_csv("C:/Users/user/Desktop/DZ/Course_5/Курсовая/data/" + i + "_prop.csv",
+                                           index_label=False)
     except Exception:
         input("Check webpage before it's closure")
         raise
@@ -347,17 +354,17 @@ def region_elections(link, dates, conditions, driver, what_to_extract, is_federa
         undo(undo_conditions, driver)
     input_boxes = driver.find_elements(By.XPATH, "//span[@class='select2-search select2-search--inline']")
     for i in range(4):
-        if conditions[i] is None:
+        if conditions[i] is None or conditions[i] == "not specified":
             continue
-        my_click(input_boxes[i], driver)
+        my_click(input_boxes[i], driver, wait=False)
         for j in driver.find_elements_by_xpath(  # оптимизировать, чтобы не прогонять по selectoram, где value = None
                 "//span[@class='select2-container select2-container--default select2-container--open']/*/*/*/li"):
             if j.text == conditions[i]:
-                my_click(j, driver)
+                my_click(j, driver, wait=False)
         my_click(driver.find_element_by_xpath(
             "//div[@class='select2-link2 select2-close']/button[@class='btn btn-primary']"
-        ), driver)
-    my_click(driver.find_element_by_xpath("//button[@id='calendar-btn-search']"), driver)
+        ), driver, wait=False)
+    my_click(driver.find_element_by_xpath("//button[@id='calendar-btn-search']"), driver, wait=False)
     vibory_elements = driver.find_elements_by_xpath("//a[@class='viboryLink']")
     vibory_links = [el.get_attribute("href") for el in vibory_elements]
     vibory_texts = [el.text for el in vibory_elements]
@@ -365,13 +372,18 @@ def region_elections(link, dates, conditions, driver, what_to_extract, is_federa
     if len(vibory_links) == 0:
         print("Can't found any elections")
         return result_dict
-    for i in range(len(vibory_links)):
+    for i in range(len(vibory_links)):  #range(len(vibory_links))
         my_get(driver, vibory_links[i])
         my_click(driver.find_element_by_xpath("//div[@class='main__menu']/div[2]/ul/div[1]/a"), driver)
         year = driver.find_element_by_xpath("//div[@id='election-info']/div/div[3]/div[2]/b").text.split(r".")[2]
         my_click(driver.find_element_by_xpath("//a[@id='election-results-name']"), driver)
-        menu_options = driver.find_elements_by_xpath("//tbody/tr[@class='trReport']/td/a")
-        if what_to_extract["maj_data"]:  # call for another function (maj case or prop case or smth)
+        menu_options = driver.find_elements_by_xpath("//div/div[9]/table/tbody/tr[@class='trReport']/td/a")
+        presence = {"maj_case": False, "prop_case": False}
+        if sum([True for i in [el.text for el in menu_options] if "единому" in i]) > 0:
+            presence["prop_case"] = True
+        if sum([True for i in [el.text for el in menu_options] if "одномандат" in i]) > 0:
+            presence["maj_case"] = True
+        if what_to_extract["maj_data"] and presence["maj_case"]:  # call for another function (maj case or prop case or smth)
             maj_data = automatic_restart(function_name="maj_case",
                                          args={"driver": driver,
                                                "what_to_extract": what_to_extract,
@@ -383,7 +395,9 @@ def region_elections(link, dates, conditions, driver, what_to_extract, is_federa
                 maj_data["year"] = pd.Series(repeat(year, len(maj_data.iloc[:, 0])))
                 maj_data["name_of_elections"] = pd.Series(repeat(vibory_texts[i], len(maj_data.iloc[:, 0])))
                 result_dict["maj_data"] = result_dict["maj_data"].append(maj_data)
-        if what_to_extract["prop_data"]:
+        else:
+            print("No info about maj_case")
+        if what_to_extract["prop_data"] and presence["prop_case"]:
             prop_data = automatic_restart(function_name="prop_case",
                                           args={"driver": driver,
                                                 "what_to_extract": what_to_extract,
@@ -395,8 +409,36 @@ def region_elections(link, dates, conditions, driver, what_to_extract, is_federa
                 prop_data["year"] = pd.Series(repeat(year, len(prop_data.iloc[:, 0])))
                 prop_data["name_of_elections"] = pd.Series(repeat(vibory_texts[i], len(prop_data.iloc[:, 0])))
                 result_dict["prop_data"] = result_dict["prop_data"].append(prop_data)
+        else:
+            print("No info about prop_case")
         # Два идентичных if, можно сократить запись?
     return result_dict
+
+
+def get_info_about_candidates_maj(driver, path, i):
+    cand_names = pd.Series(
+        [el.text for el in driver.find_elements_by_xpath(  # можно оптимизировать: 3 к ряду
+            "//tbody[@valign='top']/tr/td[2]"
+        )])
+    birth_date = pd.Series(
+        [el.text for el in driver.find_elements_by_xpath(  # можно оптимизировать: 3 к ряду
+            "//tbody[@valign='top']/tr/td[3]"
+        )])
+    nom_subject = pd.Series([el.text for el in driver.find_elements_by_xpath(
+        "//tbody[@valign='top']/tr/td[4]"
+    )])
+    county_num = pd.Series([el.text for el in driver.find_elements_by_xpath(
+        "//tbody[@valign='top']/tr/td[5]"
+    )])
+    county_name = driver.find_element_by_xpath(path + f"[{i + 1}]/a[2]").text
+    county_names = pd.Series([county_name for j in range(len(cand_names))])
+    reg_status = pd.Series([True if el.text == "зарегистрирован" else False for el in
+                            driver.find_elements_by_xpath("//tbody[@valign='top']/tr/td[7]")])
+    elec_status = pd.Series([el.text if len(el.text) > 0 else np.NaN for
+                             el in driver.find_elements_by_xpath("//tbody/tr/td[8]")])
+    return pd.DataFrame({"cand_names": cand_names, "birth_data": birth_date, "nom_subject": nom_subject,
+                         "county_num": county_num, "county_names": county_names, "reg_status": reg_status,
+                         "electoral_status": elec_status})
 
 
 def maj_case(driver, what_to_extract, is_federal, region):  # with uik's
@@ -412,13 +454,17 @@ def maj_case(driver, what_to_extract, is_federal, region):  # with uik's
     else:
         path = "//div/ul/li/ul/li"
     my_click(driver.find_element_by_xpath("//a[@id='standard-reports-name']"), driver)  # independent
-    try:
-        my_click(driver.find_element_by_xpath("//a[@id='220-rep-dir-link']"), driver)  # dependent.
-    except sel_exc.NoSuchElementException:
-        input("No info about maj_case")
-        return None
-    # В ссылка содержится информация о том, из какого меню мы их открыли, поэтому для разных целей нужны разные
+    #try:
+    #    my_click(driver.find_element_by_xpath("//a[@id='220-rep-dir-link']"), driver)  # dependent.
+    #except sel_exc.NoSuchElementException:
+    #if sum([True for i in
+    #        driver.find_elements_by_xpath(
+    #            "//table/tbody/tr[@class='tdReport']/td/a") if "одномандатным" in i.text]) == 0:
+    #    input("No info about maj_case")
+    #    return None
+    # В ссылках содержится информация о том, из какого меню мы их открыли, поэтому для разных целей нужны разные
     # counties_links
+    my_click(driver.find_element_by_xpath("//a[@id='220-rep-dir-link']"), driver)
     counties_links = [county.get_attribute('href') for county in driver.find_elements_by_xpath(
         path + "/a[2]"
     )]
@@ -432,15 +478,6 @@ def maj_case(driver, what_to_extract, is_federal, region):  # with uik's
     links_to_delete = []
     if not what_to_extract["uiks_numbers_only"]:
         for i in range(start_point, len(counties_links)):
-            #temp_list = [region_dict[j] for j in list(region_dict.keys) if counties_text[i] == j]
-            #if len(temp_list) != 0:
-            #    if len(temp_list) == 1:
-            #        county_region = temp_list[0]
-            #    else:
-            #        county_region = None
-            #        breakpoint()
-            #else:
-            #    county_region = region
             my_get(driver, counties_links[i])
             cand_names = pd.Series([el.text for el in driver.find_elements_by_xpath(  # можно оптимизировать: 3 к ряду
                 "//tbody[@valign='top']/tr/td[2]"
@@ -451,48 +488,12 @@ def maj_case(driver, what_to_extract, is_federal, region):  # with uik's
                 counties_links = counties_links + temp_links
                 for temp_link in temp_links:
                     my_get(driver, temp_link)
-                    cand_names = pd.Series(
-                        [el.text for el in driver.find_elements_by_xpath(  # можно оптимизировать: 3 к ряду
-                            "//tbody[@valign='top']/tr/td[2]"
-                        )])
-                    nom_subject = pd.Series([el.text for el in driver.find_elements_by_xpath(
-                        "//tbody[@valign='top']/tr/td[4]"
-                    )])
-                    county_num = pd.Series([el.text for el in driver.find_elements_by_xpath(
-                        "//tbody[@valign='top']/tr/td[5]"
-                    )])
-                    county_name = driver.find_element_by_xpath(path + f"[{i + 1}]/a[2]").text
-                    county_names = pd.Series([county_name for j in range(len(cand_names))])
-                    reg_status = pd.Series([True if el.text == "зарегистрирован" else False for el in
-                                            driver.find_elements_by_xpath("//tbody[@valign='top']/tr/td[7]")])
-                    #county_regions = pd.Series(county_region for j in range(len(cand_names)))
-                    data_info = data_info.append(pd.DataFrame({"cand_names": cand_names, "nom_subject": nom_subject,
-                                                               "county_num": county_num, "county_names": county_names,
-                                                               "reg_status": reg_status}))
+                    data_info = data_info.append(get_info_about_candidates_maj(driver, path, i))
             else:
-                cand_names = pd.Series(
-                    [el.text for el in driver.find_elements_by_xpath(  # можно оптимизировать: 3 к ряду
-                        "//tbody[@valign='top']/tr/td[2]"
-                    )])
-                nom_subject = pd.Series([el.text for el in driver.find_elements_by_xpath(
-                    "//tbody[@valign='top']/tr/td[4]"
-                )])
-                county_num = pd.Series([el.text for el in driver.find_elements_by_xpath(
-                    "//tbody[@valign='top']/tr/td[5]"
-                )])
-                county_name = driver.find_element_by_xpath(path + f"[{i + 1}]/a[2]").text
-                county_names = pd.Series([county_name for j in range(len(cand_names))])
-                reg_status = pd.Series([True if el.text == "зарегистрирован" else False for el in
-                                        driver.find_elements_by_xpath("//tbody[@valign='top']/tr/td[7]")])
-                #county_regions = pd.Series(county_region for j in range(len(cand_names)))
-                data_info = data_info.append(pd.DataFrame({"cand_names": cand_names, "nom_subject": nom_subject,
-                                                           "county_num": county_num, "county_names": county_names,
-                                                           "reg_status": reg_status}))
-    #if len(links_to_delete) != 0:
-    #    corrector = 0
-    #    for i in links_to_delete:
-    #        del counties_links[i-corrector]
-    #        corrector += 1
+                data_info = data_info.append(get_info_about_candidates_maj(driver, path, i))
+        data_info = convert_party_names(data_info, "nom_subject")
+        #if what_to_extract["electoral_results"]:
+        #    return data_info
     if len(links_to_delete) != 0:
         for i in sorted(links_to_delete, reverse=True):
             del counties_links[i]
@@ -501,17 +502,13 @@ def maj_case(driver, what_to_extract, is_federal, region):  # with uik's
     menu_options = driver.find_elements_by_xpath("//tbody/tr[@class='trReport']/td/a")
     my_click(menu_options[[i for i, z in enumerate([el.text for el in menu_options])
                            if "Сводная" in z and "одномандат" in z][0]], driver)
-    #counties_links = [county.get_attribute('href') for county in driver.find_elements_by_xpath(
-    #    path + "/a[2]"
-    #)]
-    # got new brand new counties links, wow
-    #data = pd.DataFrame()
     numbers = [i for i in range(start_point, len(driver.find_elements_by_xpath(path + "/a[2]")))]
     data = sub_counties_tricks(driver, numbers,
                                path=path,
                                what_to_extract=what_to_extract,
                                connector="cand_names",
-                               region=region)
+                               region=region,
+                               data_info=data_info)
     if not what_to_extract["uiks_numbers_only"]:
         final_dataset = pd.merge(data, data_info, on="cand_names", how="inner")
     else:
@@ -536,12 +533,12 @@ def prop_case(driver, what_to_extract, is_federal, region):
     my_click(driver.find_element_by_xpath("//a[@id='election-results-name']"), driver)
     reports_options = driver.find_elements_by_xpath("//div[@id='election-results']/table/tbody/tr/td/a")
     reports_options_text = [el.text for el in reports_options]
-    try:
-        reports_options[[i for i, z in enumerate(reports_options_text) if
-                         "Сводная" in z and ("единому" in z or "федеральному" in z)][0]]
-    except IndexError:
-        input("No info about prop_case")
-        return None
+    #try:
+    #    reports_options[[i for i, z in enumerate(reports_options_text) if
+    #                     "Сводная" in z and ("единому" in z or "федеральному" in z)][0]]
+    #except IndexError:
+    #    input("No info about prop_case")
+    #    return None
     my_click(driver.find_element_by_xpath("//a[@id='election-results-name']"), driver)
     # my_get(driver, driver.find_element_by_xpath("//div/ul/li/a[2]").get_attribute("href"))
     data_info = pd.DataFrame()
@@ -550,10 +547,54 @@ def prop_case(driver, what_to_extract, is_federal, region):
         reports_options = [i for i in
                            driver.find_elements_by_xpath("//div[@id='standard-reports']/table/tbody/tr/td/a")]
         reports_options_text = [el.text for el in reports_options]
+        # Electoral results______________
+        my_click(reports_options[[
+            i for i, z in enumerate(reports_options_text) if ("кандидатов" in z and "партиями" in z) or
+                                                             (z == "Сведения о кандидатах")][0]], driver)
+        pages = driver.find_elements_by_xpath("//div[@class='pagin']/ul[2]/li/a")
+        last_box = pages[len(pages) - 1].get_attribute("href")
+        pages_overall = int(last_box[(re.search("number=", last_box).span()[1]):]) + 1
+        cand_data = pd.DataFrame()
+        for i in range(1, pages_overall):
+            if i != 1:
+                pages = driver.find_elements_by_xpath("//div[@class='pagin']/ul[1]/li/a")
+                links = [el.get_attribute("href") for el in pages]
+                next_page = [j for j, z in enumerate(links) if type(z) is str and
+                             int(z[re.search("number=", z).span()[1]:]) == i][0]
+                my_click(pages[next_page], driver)
+            else:
+                pass
+            party_cand_names = pd.Series([
+                el.text for el in driver.find_elements_by_xpath("//tbody[@id='test']/tr/td[2]")])
+            party = pd.Series([el.text for el in driver.find_elements_by_xpath("//tbody[@id='test']/tr/td[4]")])
+            electoral_status = pd.Series([
+                el.text if len(el.text) > 0 else np.NaN for el in
+                driver.find_elements_by_xpath("//tbody[@id='test']/tr/td[10]")])
+            cand_data = cand_data.append(pd.DataFrame({"party_cand_names": party_cand_names, "party_names": party,
+                                                       "electoral_status": electoral_status}))
+        cand_data = convert_party_names(cand_data, "party_names")
+        cand_data.reset_index(drop=True, inplace=True)
+        cand_data.drop(index=[i for i, z in enumerate(cand_data.electoral_status) if z is np.NaN], inplace=True)
+        cand_data_2 = pd.DataFrame()
+        for par in cand_data.party_names.unique():
+            temp_data = cand_data.loc[cand_data.party_names == par]
+            temp_var = list(zip(temp_data.party_cand_names, temp_data.electoral_status))
+            cand_data_2 = cand_data_2.append(pd.DataFrame({"party_names": [par],
+                                                           "electoral_status": [temp_var]}))
+        # Electoral results______________
+        my_click(driver.find_element_by_xpath("//a[@id='standard-reports-name']"), driver)
+        reports_options = [i for i in
+                           driver.find_elements_by_xpath("//div[@id='standard-reports']/table/tbody/tr/td/a")]
+        reports_options_text = [el.text for el in reports_options]
         my_click(reports_options[[
             i for i, z in enumerate(reports_options_text) if "Список" in z and "принимающих" in z][0]], driver)
         data_info = data_info.append(pd.DataFrame({"party_names": [el.text for el in driver.find_elements_by_xpath(
-            "//table[@id='politparty2']/tbody/tr/td[2]/form/a")]}))
+            "//table[@id='politparty2']/tbody/tr/td[2]/form/a")],
+                                                   "reg_status": [
+                                                       el.text for el in driver.find_elements_by_xpath(
+                                                           "//table/tbody/tr/td[6]")]}))
+        data_info = convert_party_names(data_info, "party_names")
+        data_info = pd.merge(data_info, cand_data_2, how="left", on="party_names")
     my_click(driver.find_element_by_xpath("//a[@id='election-results-name']"), driver)
     menu_options = driver.find_elements_by_xpath("//div[@id='election-results']/table/tbody/tr/td/a")
     menu_options_text = [el.text for el in driver.find_elements_by_xpath(
@@ -571,10 +612,11 @@ def prop_case(driver, what_to_extract, is_federal, region):
                                path=path,
                                what_to_extract=what_to_extract,
                                connector="party_names",
-                               region=region)
+                               region=region,
+                               data_info=data_info,
+                               num_of_names=sum([True for i in data_info.reg_status if len(i) > 0]))
     # solution to party_names_problem
     if not what_to_extract["uiks_numbers_only"]:
-        data_info = convert_party_names(data_info, "party_names")
         data = convert_party_names(data, "party_names")
         final_dataset = pd.merge(data, data_info, on="party_names", how="inner")
     else:
@@ -591,7 +633,7 @@ def verify_omitting(driver, numbers):
     return true_numbers
 
 
-def sub_counties_tricks(driver, numbers, path, what_to_extract, connector, region):
+def sub_counties_tricks(driver, numbers, path, what_to_extract, connector, region, data_info, num_of_names=None):
     data = pd.DataFrame()
     for i in numbers:
         with open("C:/Users/user/Desktop/DZ/Python/Projects/Elections/regions_dict.pkl", "rb") as inp:
@@ -616,7 +658,7 @@ def sub_counties_tricks(driver, numbers, path, what_to_extract, connector, regio
             omittings = verify_omitting(driver, numbers_of_sub_subcounties)
             try:
                 temp_data = get_the_data(driver, connector, what_to_extract,
-                                         omit=np.array(omittings) + 4)
+                                         omit=np.array(omittings) + 4, data_info=data_info, num_of_names=num_of_names)
             except sel_exc.NoSuchElementException as exception:
                 if exception.args[0] == "Can't found the data":
                     continue
@@ -626,7 +668,7 @@ def sub_counties_tricks(driver, numbers, path, what_to_extract, connector, regio
             if what_to_extract["uiks_numbers_only"]:
                 temp = driver.find_elements_by_xpath(path + f"[{i + 1}]" + "/ul/li")
                 uiks_numbers = [temp[j].text for j in gener(0, len(sub_sub_counties)-1,
-                                                                  omit=np.array(omittings))]
+                                                            omit=np.array(omittings))]
                 tvd = [temp[j].get_attribute("id") for j in gener(0, len(sub_sub_counties)-1,
                                                                   omit=np.array(omittings))]
                 if len(tvd) != len(temp_data.iloc[:, 0]):
@@ -642,45 +684,66 @@ def sub_counties_tricks(driver, numbers, path, what_to_extract, connector, regio
                                                    path=path+f"[{i + 1}]/ul/li",
                                                    what_to_extract=what_to_extract,
                                                    connector=connector,
-                                                   region=county_region))
+                                                   region=county_region,
+                                                   data_info=data_info,
+                                                   num_of_names=num_of_names))
     return data
 
 
-def get_the_data(driver, name, what_to_extract, omit):
+def get_the_data(driver, name, what_to_extract, omit, data_info, num_of_names=None):
+    with open("C:/Users/user/Desktop/DZ/Python/Projects/Elections/meta_data_dict.pkl", "rb") as inp:
+        meta_data_dict = pickle.load(inp)
+    names_start = 0
     data = pd.DataFrame()
-    #test
+    # test
     try:
         driver.find_element_by_xpath(
             "//table[@id='fix-columns-table']/tbody/tr/td[2]")
     except sel_exc.NoSuchElementException as exception:
         raise sel_exc.NoSuchElementException("Can't found the data")
-    #test
-    smth_names = pd.Series([el.text for el in driver.find_elements_by_xpath(
-        "//table[@id='fix-columns-table']/tbody/tr/td[2]")])
+    smth_names = [el.text for el in driver.find_elements_by_xpath(
+        "//table[@id='fix-columns-table']/tbody/tr/td[2]")]
+    if num_of_names is not None:
+        names_start = len(smth_names) - num_of_names
+    else:
+        num_of_names = 0
+    columns_to_delete = []
+    for i in range(len(smth_names) - num_of_names):
+        if smth_names[i] in list(data_info.iloc[:, 0]):
+            names_start = i
+            break
+        elif smth_names[i] in list(meta_data_dict.keys()):
+            if meta_data_dict[smth_names[i]] != "None":
+                smth_names[i] = meta_data_dict[smth_names[i]]
+            else:
+                columns_to_delete.append(i)
+        else:
+            value = input(f"The name is {smth_names[i]}, enter the value")
+            meta_data_dict[smth_names[i]] = value
+            with open("C:/Users/user/Desktop/DZ/Python/Projects/Elections/meta_data_dict.pkl", "wb") as outp:
+                pickle.dump(meta_data_dict, outp, pickle.HIGHEST_PROTOCOL)
+            if value != "None":
+                smth_names[i] = value
+            else:
+                columns_to_delete.append(i)
+    names_start -= len(columns_to_delete)
+    for i in sorted(columns_to_delete, reverse=True):
+        del smth_names[i]
     for j in gener(4, len(driver.find_elements_by_xpath("//table[@id='fix-columns-table']/thead/tr/th")), omit):
+        temp_data = pd.DataFrame()
         uik_num = driver.find_element_by_xpath("//table[@id='fix-columns-table']/thead/tr/th[%s]" % j).text
         if what_to_extract["uiks_numbers_only"]:
             data = data.append(pd.DataFrame({"uik_num": pd.Series(uik_num)}))
             continue
-        result = pd.Series(list(map(int, [el.text for el in driver.find_elements_by_xpath(
-            "//table[@id='fix-columns-table']/tbody/tr/td[%s]/nobr/b" % j)])))
-        uik_nums = pd.Series([uik_num for t in range(len(result))])
-        came_to_ballotbox = result[[
-            y for y, z in enumerate(smth_names) if "число бюллетеней, содержащихся в" in z.lower()
-                                                   or "число бюллетеней в" in z.lower()
-                                                   or "число избирательных бюллетеней, содержащихся в" in z.lower()
-        ]].sum()
-        num_of_registered_voters = int(result[[
-            y for y, z in enumerate(smth_names) if "число избирателей, внесенных в список" in z.lower() or
-                                                   "число избирателей, внесенных в списки" in z.lower() or
-                                                   "число избирателей, включенных в список" in z.lower()
-        ]])
-        came_to_ballotbox = pd.Series(repeat(came_to_ballotbox, len(result)))
-        num_of_registered_voters = pd.Series(repeat(num_of_registered_voters, len(result)))
-        data_dict = {"x": smth_names, "votes": result, "uik": uik_nums,
-                     "came_to_ballotbox": came_to_ballotbox,
-                     "num_of_registered_voters": num_of_registered_voters}
-        data = data.append(pd.DataFrame(data_dict))
+        result = list(map(int, [el.text for el in driver.find_elements_by_xpath(
+            "//table[@id='fix-columns-table']/tbody/tr/td[%s]/nobr/b" % j)]))
+        uik_nums = [uik_num for t in range(names_start, len(smth_names))]
+        temp_data = temp_data.append(pd.DataFrame({
+            "x": pd.Series(smth_names[names_start:]), "votes": pd.Series(result[names_start:]),
+            "uik": pd.Series(uik_nums)}))
+        for k in range(names_start):
+            temp_data[smth_names[k]] = pd.Series(repeat(result[k], len(smth_names) - names_start))
+        data = data.append(temp_data)
     if not what_to_extract["uiks_numbers_only"]:
         data = data.rename(columns={"x": name})
     return data
@@ -698,13 +761,19 @@ def gener(start_point, end_point, omit):  # generates numbers from start_point t
 
 
 if __name__ == "__main__":
-    x = scrap_elections(regions_to_collect="Свердловская область",
-                        start_date="01.09.2021",
-                        end_date="30.09.2021",
-                        level=["Федеральный"],
+    x = scrap_elections(regions_to_collect=["Республика Коми", "Белгородская область", "Воронежская область",
+                                            "Калужская область", "Костромская область", "Курганская область",
+                                            "Магаданская область", "Новосибирская область", "Рязанская область",
+                                            "Челябинская область", "Ямало-Ненецкий АО"],
+                        start_from="Калужская область",
+                        start_date="01.01.2020",
+                        end_date="01.01.2021",
+                        level=["Региональный"],
                         kind=["Выборы депутата"],
-                        what_to_extract={"maj_data": False, "prop_data": True, "uiks_numbers_only": True},
+                        what_to_extract={"maj_data": False, "prop_data": True, "uiks_numbers_only": False,
+                                         "electoral_results": True},
                         type_of_elections=["Основные"],
                         driver_loc="C:/Users/user/Desktop/DZ/Python/Driver/geckodriver.exe",
-                        output_dir="C:/Users/user/Desktop/DZ/Python/Projects/Elections")
+                        output_dir="C:/Users/user/Desktop/DZ/Course_5/Курсовая/data",
+                        electoral_system=None)
 # Все conditions должны быть листами
