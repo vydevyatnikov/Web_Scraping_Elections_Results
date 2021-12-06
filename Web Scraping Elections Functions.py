@@ -34,9 +34,14 @@ def undo(conditions, driver):
 
 def add_alias(aliases_dictionary, name):
     alias, value = input("Name is %s, enter alias and value with comma and space between them" % name).split(", ")
-    aliases_dictionary[alias] = value
-    with open("C:/Users/user/Desktop/DZ/Python/Projects/Elections/party_names_dictionary.pkl", "wb") as outp:
-        pickle.dump(aliases_dictionary, outp, pickle.HIGHEST_PROTOCOL)
+    if alias == "None" or value == "None":
+        output = input("Value to insert")
+        return output
+    else:
+        aliases_dictionary[alias] = value
+        with open("C:/Users/user/Desktop/DZ/Python/Projects/Elections/party_names_dictionary.pkl", "wb") as outp:
+            pickle.dump(aliases_dictionary, outp, pickle.HIGHEST_PROTOCOL)
+        return "None"
 
 
 def convert_party_names(data_frame, column_with_names):
@@ -45,8 +50,8 @@ def convert_party_names(data_frame, column_with_names):
     keys = list(aliases_dictionary.keys())
     names = data_frame[column_with_names]
     index_of_neuchtennyh_row = [
-        i for i, z in enumerate(names.unique()) if "не учтенных при получении" in z or "неучтенных при получении" in z or
-                                          "не учтенных открепительных" in z]
+        i for i, z in enumerate(names.unique()) if "не учтенных при получении" in z or "неучтенных при получении" in z
+                                                   or "не учтенных открепительных" in z]
     if len(index_of_neuchtennyh_row) > 0:
         unique_names = names.unique()[(max(index_of_neuchtennyh_row) + 1):]
     else:
@@ -63,8 +68,12 @@ def convert_party_names(data_frame, column_with_names):
             data_frame.loc[data_frame[column_with_names] == name,
                            column_with_names] = aliases_dictionary[keys[alias_index]]
         else:
-            add_alias(aliases_dictionary, name)
-            return convert_party_names(data_frame, column_with_names)
+            inp_value = add_alias(aliases_dictionary, name)
+            if inp_value == "None":
+                return convert_party_names(data_frame, column_with_names)
+            else:
+                data_frame.loc[data_frame[column_with_names] == name,
+                               column_with_names] = inp_value
     return data_frame
 
 
@@ -314,10 +323,10 @@ def scrap_elections(start_date, end_date, what_to_extract, regions_to_collect="e
                                                                                       output["prop_data"].shape[0]))
                                 final_data["prop_data"] = final_data["prop_data"].append(output["prop_data"])
             #final_data["maj_data"].to_csv(output_dir + "/Intermediate_results/" + i + "_maj.csv", index_label=False)
-            final_data["maj_data"].to_csv("C:/Users/user/Desktop/DZ/Course_5/Курсовая/data/" + i + "_maj.csv",
+            final_data["maj_data"].to_csv("C:/Users/user/Desktop/DZ/Course_5/Курсовая/data/2016/" + i + "_maj.csv",
                                           index_label=False)
             #final_data["prop_data"].to_csv(output_dir + "/Intermediate_results/" + i + "_prop.csv", index_label=False)
-            final_data["prop_data"].to_csv("C:/Users/user/Desktop/DZ/Course_5/Курсовая/data/" + i + "_prop.csv",
+            final_data["prop_data"].to_csv("C:/Users/user/Desktop/DZ/Course_5/Курсовая/data/2016/" + i + "_prop.csv",
                                            index_label=False)
     except Exception:
         input("Check webpage before it's closure")
@@ -635,12 +644,20 @@ def verify_omitting(driver, numbers):
 
 def sub_counties_tricks(driver, numbers, path, what_to_extract, connector, region, data_info, num_of_names=None):
     data = pd.DataFrame()
+    counties_links = [el.get_attribute("href") for el in driver.find_elements_by_xpath(path + "/a[2]")]
     for i in numbers:
+        my_get(driver, counties_links[i])
+        for k in numbers:
+            try:
+                driver.find_element_by_xpath(path + f"[{k + 1}]" + "/ul/li/a[1]")
+            except sel_exc.NoSuchElementException:
+                continue
+            else:
+                i = k
+                break
         with open("C:/Users/user/Desktop/DZ/Python/Projects/Elections/regions_dict.pkl", "rb") as inp:
             region_dict = pickle.load(inp)
         web_elem = driver.find_element_by_xpath(path + f"[{i + 1}]/a[2]")
-        #if web_elem.text == "Одинцовская городская № 2":
-        #    breakpoint()
         temp_list = [region_dict[j] for j in list(region_dict.keys()) if web_elem.text == j]
         if len(temp_list) != 0:
             if len(temp_list) == 1:
@@ -650,7 +667,6 @@ def sub_counties_tricks(driver, numbers, path, what_to_extract, connector, regio
                 breakpoint()
         else:
             county_region = region
-        my_get(driver, web_elem.get_attribute("href"))
         sub_sub_counties = driver.find_elements_by_xpath(path + f"[{i + 1}]" + "/ul/li/a[1]")
         numbers_of_sub_subcounties = [i for i, z in enumerate(sub_sub_counties) if
                                       z.get_attribute("class") == "tree-close need-load"]
@@ -737,6 +753,8 @@ def get_the_data(driver, name, what_to_extract, omit, data_info, num_of_names=No
             continue
         result = list(map(int, [el.text for el in driver.find_elements_by_xpath(
             "//table[@id='fix-columns-table']/tbody/tr/td[%s]/nobr/b" % j)]))
+        for p in sorted(columns_to_delete, reverse=True):
+            del result[p]
         uik_nums = [uik_num for t in range(names_start, len(smth_names))]
         temp_data = temp_data.append(pd.DataFrame({
             "x": pd.Series(smth_names[names_start:]), "votes": pd.Series(result[names_start:]),
@@ -761,19 +779,18 @@ def gener(start_point, end_point, omit):  # generates numbers from start_point t
 
 
 if __name__ == "__main__":
-    x = scrap_elections(regions_to_collect=["Республика Коми", "Белгородская область", "Воронежская область",
-                                            "Калужская область", "Костромская область", "Курганская область",
-                                            "Магаданская область", "Новосибирская область", "Рязанская область",
-                                            "Челябинская область", "Ямало-Ненецкий АО"],
-                        start_from="Калужская область",
-                        start_date="01.01.2020",
-                        end_date="01.01.2021",
+    x = scrap_elections(regions_to_collect=["Кабардино-Балкарская Республика", "Карачаево-Черкесская Республика"],
+                        start_from="Тульская область",
+                        start_date="01.01.2019",
+                        end_date="01.01.2020",
                         level=["Региональный"],
                         kind=["Выборы депутата"],
-                        what_to_extract={"maj_data": False, "prop_data": True, "uiks_numbers_only": False,
+                        what_to_extract={"maj_data": True, "prop_data": True, "uiks_numbers_only": False,
                                          "electoral_results": True},
                         type_of_elections=["Основные"],
                         driver_loc="C:/Users/user/Desktop/DZ/Python/Driver/geckodriver.exe",
                         output_dir="C:/Users/user/Desktop/DZ/Course_5/Курсовая/data",
                         electoral_system=None)
 # Все conditions должны быть листами
+
+# add special case of Кабардино-Балкария
