@@ -712,20 +712,44 @@ def get_the_data(driver, name, what_to_extract, omit, data_info, num_of_names=No
     names_start = 0
     data = pd.DataFrame()
     # test
-    try:
-        driver.find_element_by_xpath(
-            "//table[@id='fix-columns-table']/tbody/tr/td[2]")
-    except sel_exc.NoSuchElementException as exception:
+    if len(driver.find_elements_by_xpath(
+            "//table[@id='fix-columns-table']/tbody/tr/td[2]")) != 0:
+        hyper_param = {"smth": "//div[@class='col']/div[2]/div/div/table[@id='fix-columns-table']/tbody/tr/td[2]",
+                       "uik": "//div[@class='col']/div[2]/div/div/table[@id='fix-columns-table']/thead/tr/th",
+                       "start_from": 4,
+                       "result": "//table[@id='fix-columns-table']/tbody/tr/td",
+                       "beforehand_del": 0}
+    elif len(driver.find_elements_by_xpath(
+            "//tr[@class='text-left']/td[2]/div/table/tbody/tr/td")) != 0:
+        hyper_param = {"smth": "//div[@class='col']/div[2]/div/table/tbody/tr[@class='text-left']" +
+                               "/td[1]/table/tbody/tr/td[2]",
+                       "start_from": 1,
+                       "uik": "//div[@class='col']/div[2]/div/table/tbody/" +
+                              "tr[@class='text-left']/td[2]/div/table/tbody/tr/th",
+                       "result": "//tr[@class='text-left']/td[2]/div/table/tbody/tr/td",
+                       "beforehand_del": 1}
+    else:
         raise sel_exc.NoSuchElementException("Can't found the data")
-    smth_names = [el.text for el in driver.find_elements_by_xpath(
-        "//table[@id='fix-columns-table']/tbody/tr/td[2]")]
+    smth_names = [el.text for el in driver.find_elements_by_xpath(hyper_param["smth"])][hyper_param["beforehand_del"]:]
+    #if hyper_param["rows_do_delete"] is not None:
+    #    hyper_param["rows_do_delete"].append([i for i, z in enumerate(smth_names) if len(z) == 0])  # need to check
     if num_of_names is not None:
         names_start = len(smth_names) - num_of_names
     else:
         num_of_names = 0
     columns_to_delete = []
+    empty_column = []  # MAXIMUM LENGHT IS EQUAL TO 1!!!
+    index_of_neuchtennyh_row = [
+        i for i, z in enumerate(smth_names) if "не учтенных при получении" in z or "неучтенных при получении" in z
+                                               or "не учтенных открепительных" in z]
+    if len(smth_names[index_of_neuchtennyh_row[-1] + 1]) == 1:
+        empty_column.append(index_of_neuchtennyh_row[-1] + 1)
+        names_start = index_of_neuchtennyh_row[-1] + 2
+    else:
+        names_start = index_of_neuchtennyh_row[-1] + 1
+    #[columns_to_delete.append(i) for i, z in enumerate(smth_names) if len(z) == 0]
     for i in range(len(smth_names) - num_of_names):
-        if smth_names[i] in list(data_info.iloc[:, 0]):
+        if len(smth_names[i]) > 1 and smth_names[i] in list(data_info.iloc[:, 0]):
             names_start = i
             break
         elif smth_names[i] in list(meta_data_dict.keys()):
@@ -733,6 +757,8 @@ def get_the_data(driver, name, what_to_extract, omit, data_info, num_of_names=No
                 smth_names[i] = meta_data_dict[smth_names[i]]
             else:
                 columns_to_delete.append(i)
+        elif len(smth_names[i]) == 1:
+            empty_column.append(i)
         else:
             value = input(f"The name is {smth_names[i]}, enter the value")
             meta_data_dict[smth_names[i]] = value
@@ -742,17 +768,22 @@ def get_the_data(driver, name, what_to_extract, omit, data_info, num_of_names=No
                 smth_names[i] = value
             else:
                 columns_to_delete.append(i)
-    names_start -= len(columns_to_delete)
-    for i in sorted(columns_to_delete, reverse=True):
+    names_start -= len(columns_to_delete) + len(empty_column)
+    if len(empty_column) > 1:
+        breakpoint()
+    for i in sorted(columns_to_delete + empty_column, reverse=True):
         del smth_names[i]
-    for j in gener(4, len(driver.find_elements_by_xpath("//table[@id='fix-columns-table']/thead/tr/th")), omit):
+    for j in gener(hyper_param["start_from"], len(driver.find_elements_by_xpath(hyper_param["uik"])), omit):
         temp_data = pd.DataFrame()
-        uik_num = driver.find_element_by_xpath("//table[@id='fix-columns-table']/thead/tr/th[%s]" % j).text
+        uik_num = driver.find_element_by_xpath(hyper_param["uik"] + f"[{j}]").text
         if what_to_extract["uiks_numbers_only"]:
             data = data.append(pd.DataFrame({"uik_num": pd.Series(uik_num)}))
             continue
-        result = list(map(int, [el.text for el in driver.find_elements_by_xpath(
-            "//table[@id='fix-columns-table']/tbody/tr/td[%s]/nobr/b" % j)]))
+        result = [el.text for el in driver.find_elements_by_xpath(
+            hyper_param["result"] + f"[{j}]/nobr/b")]
+        if len(result) != len(smth_names) and len(result[empty_column[0]]) == 1:
+            del result[empty_column[0]]
+        result = list(map(int, result))
         for p in sorted(columns_to_delete, reverse=True):
             del result[p]
         uik_nums = [uik_num for t in range(names_start, len(smth_names))]
@@ -779,18 +810,34 @@ def gener(start_point, end_point, omit):  # generates numbers from start_point t
 
 
 if __name__ == "__main__":
-    x = scrap_elections(regions_to_collect=["Кабардино-Балкарская Республика", "Карачаево-Черкесская Республика"],
-                        start_from="Тульская область",
-                        start_date="01.01.2019",
-                        end_date="01.01.2020",
+    x = scrap_elections(regions_to_collect=["Республика Адыгея", "Республика Дагестан", "Республика Ингушетия",
+                                            "Республика Карелия", "Республика Мордовия", "Чеченская Республика",
+                                            "Чувашская Республика", "Алтайский край", "Камчатский край",
+                                            "Красноярский край", "Пермский край", "Приморский край",
+                                            "Ставропольский край", "Амурская область", "Астраханская область",
+                                            "Вологодская область", "Калининградская область", "Кировская область",
+                                            "Курская область", "Ленинградская область", "Липецкая область",
+                                            "Московская область", "Мурманская область", "Нижегородская область",
+                                            "Новгородская область", "Омская область", "Оренбургская область",
+                                            "Орловская область", "Псковская область", "Самарская область",
+                                            "Свердловская область", "Тамбовская область", "Тверская область",
+                                            "Томская область", "Тюменская область", "Санкт-Петербург",
+                                            "Еврейская автономная область", "Ханты-Мансийский АО", "Чукотский АО"],
+                        start_from="Республика Дагестан",
+                        start_date="01.01.2016",
+                        end_date="01.01.2017",
                         level=["Региональный"],
                         kind=["Выборы депутата"],
                         what_to_extract={"maj_data": True, "prop_data": True, "uiks_numbers_only": False,
                                          "electoral_results": True},
                         type_of_elections=["Основные"],
                         driver_loc="C:/Users/user/Desktop/DZ/Python/Driver/geckodriver.exe",
-                        output_dir="C:/Users/user/Desktop/DZ/Course_5/Курсовая/data",
+                        output_dir="C:/Users/user/Desktop/DZ/Course_5/Курсовая/data/2019",
                         electoral_system=None)
 # Все conditions должны быть листами
 
+# Python/Projects/Elections
+
 # add special case of Кабардино-Балкария
+
+# Course_5/Курсовая/data
