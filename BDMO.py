@@ -4,7 +4,7 @@ import itertools as iter
 from selenium.webdriver import Chrome
 from selenium.webdriver import ChromeOptions
 import selenium.common.exceptions as sel_exc
-
+# разобраться с warning для Амурской области
 
 class Container:
 
@@ -53,11 +53,11 @@ class RaionsPage:
 
         for raion in self.links.keys():
             self.choose_indicators(raion)
-            self.get_the_data(raion)
+            #self.get_the_data(raion)
 
     def find_links(self):
         links = {}
-        banned_words = ["районы", "городские округа", "область", "край", "республика", " округ "]
+        banned_words = ["районы", "городские округа", "область", "край", "республика", " округ ", "образования"]
         divs = self.driver.find_elements_by_xpath("//div[@id='WebTree']/div")
         div_id = [el.get_attribute("id") for el in divs]
         texts = [el.text.lower() for el in divs]
@@ -101,8 +101,11 @@ class RaionsPage:
         self.driver.find_element_by_xpath("//table[@class='tbl']/tbody/tr[10]/td/input").click()
         indicators_types_texts = [el.text.lower() for el in self.driver.find_elements_by_xpath(
             "//table[@class='tbl']/tbody/tr[10]/td/span/div/span/span[2]")]
-        indicators_types_num = [i for i, z in enumerate(indicators_types_texts) if
-                                "местного самоуправления" in z][0]
+        try:
+            indicators_types_num = [i for i, z in enumerate(indicators_types_texts) if
+                                    "местного самоуправления" in z][0]
+        except IndexError:
+            return
         self.driver.find_elements_by_xpath(
             "//table[@class='tbl']/tbody/tr[10]/td/span/div/span/span[2]")[indicators_types_num].click()
         indicator_menu_text = [el.text.lower() for el in self.driver.find_elements_by_xpath(
@@ -113,7 +116,18 @@ class RaionsPage:
             if sum([1 if ind in indicator_menu_text[i] else 0 for ind in self.indicators]) > 0:
                 indicator_menu[i].click()
         self.driver.find_element_by_xpath("//td[@class='buttons']/input[@name='Button_Table']").click()
-        return self
+
+        years = pd.Series([el.text for el in self.driver.find_elements_by_xpath(
+            "//table[@class='passport']/tbody/tr[1]/th")[2:]], dtype="int")
+        temp_data = pd.DataFrame({**{"year": years, "region": pd.Series(iter.repeat(self.region, len(years))),
+                                     "raion": pd.Series(iter.repeat(raion, len(years)))},
+                                  **{i: iter.repeat(np.NaN, len(years)) for i in self.indicators}})
+        for j in range(2, len(self.driver.find_elements_by_xpath("//table[@class='passport']/tbody/tr")) + 1):
+            indicator = self.driver.find_element_by_xpath(f"//table[@class='passport']/tbody/tr[{j}]/td[1]").text
+            temp_data[self.indicators[[i for i, z in enumerate(self.indicators) if z in indicator][0]]] = [
+                float(el.text) if len(el.text) > 0 else np.NaN for el in self.driver.find_elements_by_xpath(
+                    f"//table[@class='passport']/tbody/tr[{j}]/td[position()>2]")]
+        self.data = self.data.append(temp_data)
 
     def get_the_data(self, raion):
         years = pd.Series([el.text for el in self.driver.find_elements_by_xpath(
@@ -144,7 +158,7 @@ class RaionData:
 
 
 if __name__ == "__main__":
-    Container(regions=["Амурская область"], indicators=[
+    Container(regions=["Кировская область"], indicators=[
         "автодорог", "автобусного", "аварийном", "незавершенного", "жилищные"], years=["years"])
 
 # ["Приморский край", "Амурская область", "Кировская область", "Липецкая область", "Мурманская область",
