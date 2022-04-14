@@ -44,12 +44,14 @@ class Container:
 class RaionsPage:
 
     def __init__(self, years, indicators, driver, region):
+        self.region = region
         self.years = years
         self.indicators = indicators
         self.data = pd.DataFrame()
         self.driver = driver
-        self.links = self.find_links()
-        self.region = region
+
+        self.links = {}
+        self.find_links()
 
         for raion in self.links.keys():
             self.choose_indicators(raion)
@@ -90,6 +92,54 @@ class RaionsPage:
                     f"//div[@id='WebTree']/div[{num}]/div[{j}]/a").get_attribute("href") for j in sub_rows}}
                 sub_rows = [1]
         return links
+
+    def some_func(self, banned_words, num=None, path="//div[@id='WebTree']"):
+        divs = self.driver.find_elements_by_xpath(path + "/div")
+        div_id = [el.get_attribute("id") for el in divs]
+        texts = [el.text.lower() for el in divs]
+        if num is None:
+            num = len(divs)
+        count = 1
+        while count <= num:
+            what_type, is_folder = None, False
+            seq = [True if i in texts[count - 1] else False for i in banned_words]
+            if sum(seq) > 0:
+                what_type = np.array(banned_words)[seq]
+            if len(div_id[count - 1]) != 0:
+                is_folder = True
+            elif what_type is not None:
+                count += 1
+                continue
+            else:
+                self.links[texts[count-1]] = divs[count-1].get_attribute["href"]
+
+
+
+
+
+
+        div = self.driver.find_elements_by_xpath(path+f"/div[{num}]")
+        div_id, text = div.get_attribute("id"), div.text.lower()
+        seq = [1 if i in texts[num - 1] else 0 for i in banned_words]
+        if sum(seq) > 0:
+            if len(div_id[num - 1]) != 0 and seq[1] == 1:
+                cities = True
+            else:
+                return 1
+        if len(div_id) == 0:
+            self.links[self.driver.find_element_by_xpath(
+                path+f"/div[{num}]/a").text] = self.driver.find_element_by_xpath(
+                path+f"/div[{num}]/a").get_attribute("href")
+            return 1
+        elif "title" in div_id:
+            div.click()
+        else:
+            breakpoint()
+
+
+
+
+
 
     def choose_indicators(self, raion):
         self.driver.get(self.links[raion])
