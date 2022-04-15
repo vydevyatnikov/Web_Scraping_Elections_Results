@@ -96,11 +96,16 @@ class RaionsPage:
         indicators_types_texts = [el.text.lower() for el in self.driver.find_elements_by_xpath(
             "//table[@class='tbl']/tbody/tr[10]/td/span/div/span/span[2]")]
         try:
-            indicators_types_num = [i for i, z in enumerate(indicators_types_texts) if
+            indicators_types_num = [i for i, z in enumerate(indicators_types_texts) if  # replace "почтовая" with var
                                     "местного самоуправления" in z or "почтовая" in z]
         except IndexError:
             return
-        for ind_num in indicators_types_num:
+
+        how_many_types = len(indicators_types_num)
+        mapping_dict = {str(g): {} for g in range(how_many_types)}
+
+        for j in range(how_many_types):
+            ind_num = indicators_types_num[j]
             self.driver.find_elements_by_xpath(
                 "//table[@class='tbl']/tbody/tr[10]/td/span/div/span/span[2]")[ind_num].click()
             indicator_menu_text = [el.text.lower() for el in self.driver.find_elements_by_xpath(
@@ -108,28 +113,39 @@ class RaionsPage:
             indicator_menu = self.driver.find_elements_by_xpath(
                 f"//table[@class='tbl']/tbody/tr[10]/td/span/div[{ind_num+1}]/div/div/a/input")
             for i in range(len(indicator_menu_text)):
-                if sum([1 if ind in indicator_menu_text[i] else 0 for ind in self.indicators]) > 0:
+                indic_temp = [True if ind in indicator_menu_text[i] else False for ind in self.indicators]
+                if sum(indic_temp) > 0:
+                    mapping_dict[str(j)][self.indicators[indic_temp]] = len(mapping_dict[str(j)])
                     indicator_menu[i].click()
         self.driver.find_element_by_xpath("//td[@class='buttons']/input[@name='Button_Table']").click()
+        self.extract_the_data(mapping_dict)
 
-        years = pd.Series([el.text for el in self.driver.find_elements_by_xpath(
-            "//table[@class='passport']/tbody/tr[1]/th")[2:]], dtype="int")
-        temp_data = pd.DataFrame({**{"year": years, "region": pd.Series(iter.repeat(self.region, len(years))),
-                                     "raion": pd.Series(iter.repeat(raion, len(years)))},
-                                  **{i: iter.repeat(np.NaN, len(years)) for i in self.indicators}})
-        for j in range(2, len(self.driver.find_elements_by_xpath("//table[@class='passport']/tbody/tr")) + 1):
-            indicator = self.driver.find_element_by_xpath(
-                f"//table[@class='passport']/tbody/tr[{j}]/td[1]").text.lower()
-            temp_data[self.indicators[[i for i, z in enumerate(self.indicators) if z in indicator][0]]] = [
-                float(el.text) if len(el.text) > 0 else np.NaN for el in self.driver.find_elements_by_xpath(
-                    f"//table[@class='passport']/tbody/tr[{j}]/td[position()>2]")]
-        self.data = self.data.append(temp_data)
+
+        #years = pd.Series([el.text for el in self.driver.find_elements_by_xpath(
+        #    "//table[@class='passport']/tbody/tr[1]/th")[2:]], dtype="int")
+        #temp_data = pd.DataFrame({**{"year": years, "region": pd.Series(iter.repeat(self.region, len(years))),
+        #                             "raion": pd.Series(iter.repeat(raion, len(years)))},
+        #                          **{i: iter.repeat(np.NaN, len(years)) for i in self.indicators}})
+        #for j in range(2, len(self.driver.find_elements_by_xpath("//table[@class='passport']/tbody/tr")) + 1):
+        #    indicator = self.driver.find_element_by_xpath(
+        #        f"//table[@class='passport']/tbody/tr[{j}]/td[1]").text.lower()
+        #    temp_data[self.indicators[[i for i, z in enumerate(self.indicators) if z in indicator][0]]] = [
+        #        float(el.text) if len(el.text) > 0 else np.NaN for el in self.driver.find_elements_by_xpath(
+        #            f"//table[@class='passport']/tbody/tr[{j}]/td[position()>2]")]
+        #self.data = self.data.append(temp_data)
+
+    def extract_the_data(self, mapping):
+        for ind_type in range(1, len(mapping)+1):
+            indicators = [el.text for el in self.driver.find_elements_by_xpath(
+                f"//span[@id='resulttable']/table[{ind_type}]/tr[postition()>1]/td[1]")]
+            ind_nums = [i for i, z in enumerate(indicators) if
+                        sum([True if k in z else False for k in self.indicators]) > 0]
 
 
 if __name__ == "__main__":
-    Container(regions=["Хабаровский край"], indicators=[
+    Container(regions=["Хабаровский край"], indicators=np.array([
         "доля протяженности автодорог общего пользования местного значения, не отвечающих", "автобусного", "аварийном",
-        "незавершенного", "нуждающегося"], years=["years"])
+        "незавершенного", "нуждающегося"]), years=["years"])
 
 # ["Приморский край", "Амурская область", "Кировская область", "Липецкая область", "Мурманская область",
 # "Костромская область", "Республика Алтай", "Республика Марий Эл", "Хабаровский край", "Тульская область"]
