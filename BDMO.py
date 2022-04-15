@@ -19,6 +19,7 @@ class Container:
             self.data = pd.DataFrame()
             self.initiate_process()
         finally:
+            breakpoint()
             self.driver.quit()
 
     def initiate_process(self):
@@ -51,49 +52,14 @@ class RaionsPage:
         self.driver = driver
 
         self.links = {}
-        self.find_links()
+        self.find_links(banned_words=np.array(["районы", "городские округа", "область", "край", "республика", " округ ",
+                                              "образования"]))
 
         for raion in self.links.keys():
             self.choose_indicators(raion)
             #self.get_the_data(raion)
 
-    def find_links(self):
-        links = {}
-        banned_words = ["районы", "городские округа", "область", "край", "республика", " округ ", "образования"]
-        divs = self.driver.find_elements_by_xpath("//div[@id='WebTree']/div")
-        div_id = [el.get_attribute("id") for el in divs]
-        texts = [el.text.lower() for el in divs]
-        sub_rows = [1]
-        cities = False
-
-        for num in range(1, len(divs)+1):
-            seq = [1 if i in texts[num-1] else 0 for i in banned_words]
-            if sum(seq) > 0:
-                if len(div_id[num-1]) != 0 and seq[1] == 1:
-                    cities = True
-                else:
-                    continue
-            if len(div_id[num-1]) == 0:
-                links[self.driver.find_element_by_xpath(
-                    f"//div[@id='WebTree']/div[{num}]/a").text] = self.driver.find_element_by_xpath(
-                    f"//div[@id='WebTree']/div[{num}]/a").get_attribute("href")
-                #links.append(self.driver.find_element_by_xpath(f"//div[@id='WebTree']/div[{num}]/a").
-                #             get_attribute("href"))
-            elif "title" in div_id[num-1]:
-                divs[num - 1].click()
-                if cities:
-                    sub_rows = list(range(2, len(self.driver.find_elements_by_xpath(
-                        f"//div[@id='WebTree']/div[{num+1}]/div")) + 1))
-                    cities = False
-                continue
-            else:
-                links = {**links, **{self.driver.find_element_by_xpath(f"//div[@id='WebTree']/div[{num}]/div[{j}]/a").
-                                         text: self.driver.find_element_by_xpath(
-                    f"//div[@id='WebTree']/div[{num}]/div[{j}]/a").get_attribute("href") for j in sub_rows}}
-                sub_rows = [1]
-        return links
-
-    def some_func(self, banned_words, num=None, path="//div[@id='WebTree']"):
+    def find_links(self, banned_words, num=None, path="//div[@id='WebTree']"):
         divs = self.driver.find_elements_by_xpath(path + "/div")
         div_id = [el.get_attribute("id") for el in divs]
         texts = [el.text.lower() for el in divs]
@@ -101,45 +67,23 @@ class RaionsPage:
             num = len(divs)
         count = 1
         while count <= num:
-            what_type, is_folder = None, False
+            what_type = None
             seq = [True if i in texts[count - 1] else False for i in banned_words]
             if sum(seq) > 0:
-                what_type = np.array(banned_words)[seq]
+                what_type = banned_words[seq]
             if len(div_id[count - 1]) != 0:
-                is_folder = True
-            elif what_type is not None:
-                count += 1
+                divs[count - 1].click()
+                # здесь мы оказываемся только в том случае, если имеем дело с папкой (неважно, есть запрещенка или нет)
+                if what_type is None:
+                    self.find_links(banned_words, num=1, path=path + f"/div[{count+1}]")
+                else:
+                    self.find_links(banned_words, path=path + f"/div[{count+1}]")
+                count += 2
                 continue
-            else:
-                self.links[texts[count-1]] = divs[count-1].get_attribute["href"]
-
-
-
-
-
-
-        div = self.driver.find_elements_by_xpath(path+f"/div[{num}]")
-        div_id, text = div.get_attribute("id"), div.text.lower()
-        seq = [1 if i in texts[num - 1] else 0 for i in banned_words]
-        if sum(seq) > 0:
-            if len(div_id[num - 1]) != 0 and seq[1] == 1:
-                cities = True
-            else:
-                return 1
-        if len(div_id) == 0:
-            self.links[self.driver.find_element_by_xpath(
-                path+f"/div[{num}]/a").text] = self.driver.find_element_by_xpath(
-                path+f"/div[{num}]/a").get_attribute("href")
-            return 1
-        elif "title" in div_id:
-            div.click()
-        else:
-            breakpoint()
-
-
-
-
-
+            elif what_type is None:
+                self.links[texts[count-1]] = self.driver.find_element_by_xpath(
+                    path + f"/div[{count}]/a").get_attribute("href")
+            count += 1
 
     def choose_indicators(self, raion):
         self.driver.get(self.links[raion])
@@ -153,18 +97,19 @@ class RaionsPage:
             "//table[@class='tbl']/tbody/tr[10]/td/span/div/span/span[2]")]
         try:
             indicators_types_num = [i for i, z in enumerate(indicators_types_texts) if
-                                    "местного самоуправления" in z][0]
+                                    "местного самоуправления" in z or "почтовая" in z]
         except IndexError:
             return
-        self.driver.find_elements_by_xpath(
-            "//table[@class='tbl']/tbody/tr[10]/td/span/div/span/span[2]")[indicators_types_num].click()
-        indicator_menu_text = [el.text.lower() for el in self.driver.find_elements_by_xpath(
-            f"//table[@class='tbl']/tbody/tr[10]/td/span/div[{indicators_types_num+1}]/div/div/a")]
-        indicator_menu = self.driver.find_elements_by_xpath(
-            f"//table[@class='tbl']/tbody/tr[10]/td/span/div[{indicators_types_num+1}]/div/div/a/input")
-        for i in range(len(indicator_menu_text)):
-            if sum([1 if ind in indicator_menu_text[i] else 0 for ind in self.indicators]) > 0:
-                indicator_menu[i].click()
+        for ind_num in indicators_types_num:
+            self.driver.find_elements_by_xpath(
+                "//table[@class='tbl']/tbody/tr[10]/td/span/div/span/span[2]")[ind_num].click()
+            indicator_menu_text = [el.text.lower() for el in self.driver.find_elements_by_xpath(
+                f"//table[@class='tbl']/tbody/tr[10]/td/span/div[{ind_num+1}]/div/div/a")]
+            indicator_menu = self.driver.find_elements_by_xpath(
+                f"//table[@class='tbl']/tbody/tr[10]/td/span/div[{ind_num+1}]/div/div/a/input")
+            for i in range(len(indicator_menu_text)):
+                if sum([1 if ind in indicator_menu_text[i] else 0 for ind in self.indicators]) > 0:
+                    indicator_menu[i].click()
         self.driver.find_element_by_xpath("//td[@class='buttons']/input[@name='Button_Table']").click()
 
         years = pd.Series([el.text for el in self.driver.find_elements_by_xpath(
@@ -173,43 +118,18 @@ class RaionsPage:
                                      "raion": pd.Series(iter.repeat(raion, len(years)))},
                                   **{i: iter.repeat(np.NaN, len(years)) for i in self.indicators}})
         for j in range(2, len(self.driver.find_elements_by_xpath("//table[@class='passport']/tbody/tr")) + 1):
-            indicator = self.driver.find_element_by_xpath(f"//table[@class='passport']/tbody/tr[{j}]/td[1]").text
+            indicator = self.driver.find_element_by_xpath(
+                f"//table[@class='passport']/tbody/tr[{j}]/td[1]").text.lower()
             temp_data[self.indicators[[i for i, z in enumerate(self.indicators) if z in indicator][0]]] = [
                 float(el.text) if len(el.text) > 0 else np.NaN for el in self.driver.find_elements_by_xpath(
                     f"//table[@class='passport']/tbody/tr[{j}]/td[position()>2]")]
         self.data = self.data.append(temp_data)
-
-    def get_the_data(self, raion):
-        years = pd.Series([el.text for el in self.driver.find_elements_by_xpath(
-            "//table[@class='passport']/tbody/tr[1]/th")[2:]], dtype="int")
-        temp_data = pd.DataFrame({**{"year": years, "region": pd.Series(iter.repeat(self.region, len(years))),
-                                     "raion": pd.Series(iter.repeat(raion, len(years)))},
-                                 **{i: iter.repeat(np.NaN, len(years)) for i in self.indicators}})
-        for j in range(2, len(self.driver.find_elements_by_xpath("//table[@class='passport']/tbody/tr")) + 1):
-            indicator = self.driver.find_element_by_xpath(f"//table[@class='passport']/tbody/tr[{j}]/td[1]").text
-            temp_data[self.indicators[[i for i, z in enumerate(self.indicators) if z in indicator][0]]] = [
-                float(el.text) if len(el.text) > 0 else np.NaN for el in self.driver.find_elements_by_xpath(
-                    f"//table[@class='passport']/tbody/tr[{j}]/td[position()>2]")]
-        self.data = self.data.append(temp_data)
-
-
-
-
-class RaionData:
-
-    def __init__(self, link, driver):
-        self.link = link
-        self.driver = driver
-
-        #self.driver.find_elements_by_xpath("//div/a[@class='item']").get_attribute("href")
-
-
-
 
 
 if __name__ == "__main__":
-    Container(regions=["Кировская область"], indicators=[
-        "автодорог", "автобусного", "аварийном", "незавершенного", "жилищные"], years=["years"])
+    Container(regions=["Хабаровский край"], indicators=[
+        "доля протяженности автодорог общего пользования местного значения, не отвечающих", "автобусного", "аварийном",
+        "незавершенного", "нуждающегося"], years=["years"])
 
 # ["Приморский край", "Амурская область", "Кировская область", "Липецкая область", "Мурманская область",
 # "Костромская область", "Республика Алтай", "Республика Марий Эл", "Хабаровский край", "Тульская область"]
