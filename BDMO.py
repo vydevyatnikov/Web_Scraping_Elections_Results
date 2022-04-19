@@ -58,6 +58,7 @@ class RaionsPage:
         for raion in self.links.keys():
             self.choose_indicators(raion)
             #self.get_the_data(raion)
+        self.data.to_csv(f"D:/DZ/Course_5/Курсовая/data/BDMO/{region}.csv")
 
     def find_links(self, banned_words, num=None, path="//div[@id='WebTree']"):
         divs = self.driver.find_elements_by_xpath(path + "/div")
@@ -90,7 +91,7 @@ class RaionsPage:
         years_boxes = np.array(self.driver.find_elements_by_xpath("//table[@id='yearlist']/tbody/tr/td/input"))
         years_texts = np.array([int(el.text) for el in self.driver.find_elements_by_xpath(
             "//table[@id='yearlist']/tbody/tr/td")])
-        for year in years_boxes[years_texts >= 2013]:
+        for year in years_boxes[years_texts >= 2013]: # поменять на years
             year.click()
         self.driver.find_element_by_xpath("//table[@class='tbl']/tbody/tr[10]/td/input").click()
         indicators_types_texts = [el.text.lower() for el in self.driver.find_elements_by_xpath(
@@ -102,7 +103,6 @@ class RaionsPage:
             return
 
         how_many_types = len(indicators_types_num)
-        mapping_dict = {str(g): {} for g in range(how_many_types)}
 
         for j in range(how_many_types):
             ind_num = indicators_types_num[j]
@@ -115,10 +115,111 @@ class RaionsPage:
             for i in range(len(indicator_menu_text)):
                 indic_temp = [True if ind in indicator_menu_text[i] else False for ind in self.indicators]
                 if sum(indic_temp) > 0:
-                    mapping_dict[str(j)][self.indicators[indic_temp]] = len(mapping_dict[str(j)])
                     indicator_menu[i].click()
-        self.driver.find_element_by_xpath("//td[@class='buttons']/input[@name='Button_Table']").click()
-        self.extract_the_data(mapping_dict)
+        submit_button = self.driver.find_element_by_xpath("//td[@class='buttons']/input[@name='Button_Table']")
+        if submit_button.is_enabled():
+            submit_button.click()
+        else:
+            return
+
+        data = pd.DataFrame()
+
+        for tp in range(len(self.driver.find_elements_by_xpath("//table[@class='passport']"))):
+            elems = self.driver.find_elements_by_xpath(
+                f"//table[@class='passport' and position()={tp+1}]/tbody/tr[position() > 1]/td[1]")
+            temp_df = pd.DataFrame({"class": pd.Series([el.get_attribute("class") for el in elems]),
+                                     "style": pd.Series([style if len(style) != 0 else "absent"
+                                                         for style in [el.get_attribute("style") for el in elems]]),
+                                     "text": pd.Series([el.text.lower() for el in elems])})
+            for num in range(len(self.years)):
+                temp_df[self.years[num]] = pd.Series(float(el.text) if len(el.text) > 0 else np.NaN
+                                                     for el in self.driver.find_elements_by_xpath(
+                    f"//table[@class='passport' and position()={tp+1}]/tbody/tr[position() > 1]/td[{num+3}]"))
+            data = data.append(temp_df)
+        data.reset_index(inplace=True, drop=True)
+
+        indices = np.array([len(data)])
+
+        data["indicator"] = pd.Series(iter.repeat("Not present", len(data)))
+        temp_series = data.loc[(data["class"] == "pok") & (data["style"] == "absent"), "text"]
+        for g in temp_series.index:
+            temp_series.loc[g] = np.array(list(self.indicators.keys()))[[
+                True if m in temp_series[g] else False for m in self.indicators.keys()]][0]
+        indices = np.concatenate((np.array(temp_series.index), indices))
+        for i in range(len(temp_series)):
+            data.loc[temp_series.index[i]:indices[
+                                              (indices-temp_series.index[i]) > 0].min()-1,
+                     "indicator"] = temp_series.iloc[i]
+
+        data["sub_indicator"] = pd.Series(iter.repeat("Not present", len(data)))
+        temp_series = data.loc[(data["class"] == "prizn") & (data["style"] == "padding-left: 10pt;"), "text"]
+        indices = np.concatenate((indices, np.array(temp_series.index)))
+        for i in range(len(temp_series)):
+            data.loc[temp_series.index[i]:indices[(indices-temp_series.index[i]) > 0].min()-1,
+                     "sub_indicator"] = temp_series.iloc[i]
+
+        data["times"] = pd.Series(iter.repeat("Not present", len(data)))
+        temp_series = data.loc[(data["class"] == "prizn") & (data["style"] == "padding-left: 20pt;"), "text"]
+        indices = np.concatenate((indices, np.array(temp_series.index)))
+        for i in range(len(temp_series)):
+            data.loc[temp_series.index[i]:indices[(indices-temp_series.index[i]) > 0].min()-1,
+                     "times"] = temp_series.iloc[i]
+        print("Done")
+
+        years = pd.Series([el.text for el in self.driver.find_elements_by_xpath(
+                "//table[@class='passport' and position()=1]/tbody/tr[1]/th")[2:]], dtype="int")
+        #temp_data = pd.DataFrame({"years": years, "region": pd.Series(iter.repeat(self.region, len(years))),
+        #                             "raion": pd.Series(iter.repeat(raion, len(years)))})
+        temp_data = pd.DataFrame({**{"year": years, "region": pd.Series(iter.repeat(self.region, len(years))),
+                                     "raion": pd.Series(iter.repeat(raion, len(years)))},
+                                  **{i: iter.repeat(np.NaN, len(years)) for i in self.indicators.keys()}})
+        for ind in self.indicators.keys():
+            if len(self.indicators[ind]) == 0:
+                temp_ind = data.loc[(data["indicator"] == ind) & (data["sub_indicator"] == "Not present") &
+                                    (data["times"] == "Not present")]
+                if len(temp_ind) != 0:
+                    temp_data[ind] = temp_ind.iloc[0, 3:len(years)+3].values
+            else:
+                for sub_ind in self.indicators[ind].keys():
+                    if len(self.indicators[ind][sub_ind]) == 0:
+                        temp_sub_ind = data.loc[
+                                             (data["indicator"] == ind) & (data["sub_indicator"] == sub_ind) &
+                                             (data["times"] == "Not present")]
+                        if len(temp_sub_ind) != 0:
+                            temp_data[ind] = temp_sub_ind.iloc[0, 3:len(years) + 3].values
+                    else:
+                        for t in self.indicators[ind][sub_ind].keys():
+                            if len(self.indicators[ind][sub_ind][t]) == 0:
+                                temp_t = data.loc[
+                                                     (data["indicator"] == ind) & (data["sub_indicator"] == sub_ind) &
+                                                     (data["times"] == t)]
+                                if len(temp_t) != 0:
+                                    temp_data[ind] = temp_t.iloc[0, 3:len(years) + 3].values
+        self.data = self.data.append(temp_data)
+
+
+
+
+
+
+        #how_many_types = len(indicators_types_num)
+        #mapping_dict = {str(g): {} for g in range(how_many_types)}
+        #
+        #for j in range(how_many_types):
+        #    ind_num = indicators_types_num[j]
+        #    self.driver.find_elements_by_xpath(
+        #        "//table[@class='tbl']/tbody/tr[10]/td/span/div/span/span[2]")[ind_num].click()
+        #    indicator_menu_text = [el.text.lower() for el in self.driver.find_elements_by_xpath(
+        #        f"//table[@class='tbl']/tbody/tr[10]/td/span/div[{ind_num+1}]/div/div/a")]
+        #    indicator_menu = self.driver.find_elements_by_xpath(
+        #        f"//table[@class='tbl']/tbody/tr[10]/td/span/div[{ind_num+1}]/div/div/a/input")
+        #    for i in range(len(indicator_menu_text)):
+        #        indic_temp = [True if ind in indicator_menu_text[i] else False for ind in self.indicators]
+        #        if sum(indic_temp) > 0:
+        #            mapping_dict[str(j)][self.indicators[indic_temp][0]] = len(mapping_dict[str(j)])
+        #            indicator_menu[i].click()
+        #self.driver.find_element_by_xpath("//td[@class='buttons']/input[@name='Button_Table']").click()
+       # self.extract_the_data()
 
 
         #years = pd.Series([el.text for el in self.driver.find_elements_by_xpath(
@@ -134,18 +235,35 @@ class RaionsPage:
         #            f"//table[@class='passport']/tbody/tr[{j}]/td[position()>2]")]
         #self.data = self.data.append(temp_data)
 
-    def extract_the_data(self, mapping):
-        for ind_type in range(1, len(mapping)+1):
-            indicators = [el.text for el in self.driver.find_elements_by_xpath(
-                f"//span[@id='resulttable']/table[{ind_type}]/tr[postition()>1]/td[1]")]
-            ind_nums = [i for i, z in enumerate(indicators) if
-                        sum([True if k in z else False for k in self.indicators]) > 0]
+    def extract_the_data(self, elems_df, level, indic):
+        presets = {"0": ("pok", "absent"), "1": ("prizn", "PADDING-LEFT: 10pt;"), "2": ("prizn", "PADDING-LEFT: 20pt;")}
+        temp_obj = elems_df.loc[(elems_df["class"] == presets[level][0]) & (elems_df["style"] == presets[level][2])]
+        temp_df = pd.DataFrame()
+        for row in range(len(temp_obj)):
+            mapping = [True if i in temp_obj.text[row] else False for i in indic.keys()]
+            if sum(mapping) == 0:
+                continue
+            elif len(indic[indic.keys()[mapping]]) == 0:
+                self.data = self.data.append(pd.DataFrame({}))
+            temp_df = temp_df.append(pd.DataFrame({"indicator":
+                                                   pd.Series(np.array(indic.keys())[mapping])
+                                                   if sum(mapping) > 0 else np.NaN,
+                                                   "start": temp_obj.index[row],
+                                                   "end": pd.Series(temp_obj.index[row+1]) if row != len(temp_obj)-1
+                                                   else pd.Series(len(temp_obj))}))
 
 
 if __name__ == "__main__":
-    Container(regions=["Хабаровский край"], indicators=np.array([
-        "доля протяженности автодорог общего пользования местного значения, не отвечающих", "автобусного", "аварийном",
-        "незавершенного", "нуждающегося"]), years=["years"])
+    Container(regions=["Приморский край", "Амурская область", "Кировская область", "Липецкая область",
+                       "Мурманская область", "Костромская область", "Республика Алтай", "Республика Марий Эл",
+                       "Хабаровский край", "Тульская область"],
+              indicators={
+        "доля протяженности автодорог общего пользования местного значения, не отвечающих": {},
+        "не имеющих регулярного автобусного": {},
+        "доля муниципальных дошкольных образовательных учреждений, здания которых находятся в аварийном состоянии": {},
+        "объем незавершенного в установленные сроки строительства": {},
+        "состоящего на учете в качестве нуждающегося в жилых помещениях": {}},
+              years=["2013", "2014", "2015", "2016", "2017", "2018", "2019", "2020", "2021", "2022"])
 
 # ["Приморский край", "Амурская область", "Кировская область", "Липецкая область", "Мурманская область",
 # "Костромская область", "Республика Алтай", "Республика Марий Эл", "Хабаровский край", "Тульская область"]
