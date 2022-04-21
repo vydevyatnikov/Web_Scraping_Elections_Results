@@ -20,6 +20,7 @@ class Container:
             self.initiate_process()
         finally:
             breakpoint()
+            self.data.to_csv("D:/DZ/Course_5/Курсовая/data/BDMO/overall.csv")
             self.driver.quit()
 
     def initiate_process(self):
@@ -60,18 +61,16 @@ class RaionsPage:
             #self.get_the_data(raion)
         self.data.to_csv(f"D:/DZ/Course_5/Курсовая/data/BDMO/{region}.csv")
 
-    def find_links(self, banned_words, num=None, path="//div[@id='WebTree']", settlement=None):
-        settlement_types = {"город ": "city", "городской округ ": "city", "муниципальный район": "not_city",
-                            "сельсовет": "not_city"}
+    def find_links(self, banned_words, num=None, path="//div[@id='WebTree']"):
         divs = self.driver.find_elements_by_xpath(path + "/div")
         div_id = [el.get_attribute("id") for el in divs]
-        texts = [el.text.lower() for el in divs]
+        texts = [el.text for el in divs]
         if num is None:
             num = len(divs)
         count = 1
         while count <= num:
             what_type = None
-            seq = [True if i in texts[count - 1] else False for i in banned_words]
+            seq = [True if i in texts[count - 1].lower() else False for i in banned_words]
             if sum(seq) > 0:
                 what_type = banned_words[seq]
             if len(div_id[count - 1]) != 0:
@@ -84,18 +83,12 @@ class RaionsPage:
                 count += 2
                 continue
             elif what_type is None:
-                mapping = [True if i in texts[count-1] else False for i in settlement_types.keys()]
-                if sum(mapping) > 0:
-                    self.links[texts[count-1]] = (self.driver.find_element_by_xpath(
-                        path + f"/div[{count}]/a").get_attribute("href"), settlement_types[
-                        np.array(list(settlement_types.keys()))[mapping][0]])
-                else:
-                    self.links[texts[count - 1]] = (self.driver.find_element_by_xpath(
-                        path + f"/div[{count}]/a").get_attribute("href"), "Not defined")
+                self.links[texts[count - 1]] = self.driver.find_element_by_xpath(
+                    path + f"/div[{count}]/a").get_attribute("href")
             count += 1
 
     def choose_indicators(self, raion):
-        self.driver.get(self.links[raion][0])
+        self.driver.get(self.links[raion])
         years_boxes = np.array(self.driver.find_elements_by_xpath("//table[@id='yearlist']/tbody/tr/td/input"))
         years_texts = np.array([int(el.text) for el in self.driver.find_elements_by_xpath(
             "//table[@id='yearlist']/tbody/tr/td")])
@@ -106,7 +99,8 @@ class RaionsPage:
             "//table[@class='tbl']/tbody/tr[10]/td/span/div/span/span[2]")]
         try:
             indicators_types_num = [i for i, z in enumerate(indicators_types_texts) if  # replace "почтовая" with var
-                                    "местного самоуправления" in z or "почтовая" in z]
+                                    "местного самоуправления" in z or "почтовая" in z or "коммунальная сфера" in z or
+                                    "спорт" in z or "население" in z]
         except IndexError:
             return
 
@@ -179,31 +173,35 @@ class RaionsPage:
         #temp_data = pd.DataFrame({"years": years, "region": pd.Series(iter.repeat(self.region, len(years))),
         #                             "raion": pd.Series(iter.repeat(raion, len(years)))})
         temp_data = pd.DataFrame({**{"year": years, "region": pd.Series(iter.repeat(self.region, len(years))),
-                                     "raion": pd.Series(iter.repeat(raion, len(years))),
-                                     "settlement_type": pd.Series(iter.repeat(self.links[raion][1], len(years)))},
+                                     "raion": pd.Series(iter.repeat(raion, len(years)))},
                                   **{i: iter.repeat(np.NaN, len(years)) for i in self.indicators.keys()}})
         for ind in self.indicators.keys():
+            temp_ind = data.loc[(data["indicator"] == ind) & (data["sub_indicator"] == "Not present") &
+                                (data["times"] == "Not present")]
             if len(self.indicators[ind]) == 0:
-                temp_ind = data.loc[(data["indicator"] == ind) & (data["sub_indicator"] == "Not present") &
-                                    (data["times"] == "Not present")]
                 if len(temp_ind) != 0:
                     temp_data[ind] = temp_ind.iloc[0, 3:len(years)+3].values
+                else:
+                    continue
             else:
                 for sub_ind in self.indicators[ind].keys():
+                    temp_sub_ind = data.loc[
+                        (data["indicator"] == ind) & (data["sub_indicator"] == sub_ind) &
+                        (data["times"] == "Not present")]
+                    temp_ind.iloc[0, np.array(range(temp_ind.shape[1]))[~pd.isnull(temp_sub_ind).values[0]]] = temp_sub_ind.iloc[~pd.isnull(temp_sub_ind)]
                     if len(self.indicators[ind][sub_ind]) == 0:
-                        temp_sub_ind = data.loc[
-                                             (data["indicator"] == ind) & (data["sub_indicator"] == sub_ind) &
-                                             (data["times"] == "Not present")]
-                        if len(temp_sub_ind) != 0:
-                            temp_data[ind] = temp_sub_ind.iloc[0, 3:len(years) + 3].values
+                        if len(temp_ind) != 0:
+                            temp_data[ind] = temp_ind.iloc[0, 3:len(years) + 3].values
+                        else:
+                            continue
                     else:
                         for t in self.indicators[ind][sub_ind].keys():
-                            if len(self.indicators[ind][sub_ind][t]) == 0:
-                                temp_t = data.loc[
-                                                     (data["indicator"] == ind) & (data["sub_indicator"] == sub_ind) &
-                                                     (data["times"] == t)]
-                                if len(temp_t) != 0:
-                                    temp_data[ind] = temp_t.iloc[0, 3:len(years) + 3].values
+                            temp_t = data.loc[
+                                (data["indicator"] == ind) & (data["sub_indicator"] == sub_ind) &
+                                (data["times"] == t)]
+                            temp_ind.loc[~pd.isnull(temp_t.indicator)] = temp_t[~pd.isnull(temp_t.indicator)]
+                            if len(self.indicators[ind][sub_ind][t]) == 0 and len(temp_ind) != 0:
+                                temp_data[ind] = temp_ind.iloc[0, 3:len(years) + 3].values
         self.data = self.data.append(temp_data)
 
 
@@ -271,7 +269,12 @@ if __name__ == "__main__":
         "не имеющих регулярного автобусного": {},
         "доля муниципальных дошкольных образовательных учреждений, здания которых находятся в аварийном состоянии": {},
         "объем незавершенного в установленные сроки строительства": {},
-        "состоящего на учете в качестве нуждающегося в жилых помещениях": {}},
+        "состоящего на учете в качестве нуждающегося в жилых помещениях": {},
+        "число спортивных сооружений": {},
+        "заменено и отремонтировано уличной газовой сети": {},
+        "протяженность тепловых и паровых сетей, которые были заменены и отремонтированы": {},
+        "протяжение уличной канализационной сети, которая заменена": {},
+        "оценка численности населения": {"все население": {"на 1 января"}}},
               years=["2013", "2014", "2015", "2016", "2017", "2018", "2019", "2020", "2021", "2022"])
 
 # ["Приморский край", "Амурская область", "Кировская область", "Липецкая область", "Мурманская область",
