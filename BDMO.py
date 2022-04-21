@@ -60,7 +60,9 @@ class RaionsPage:
             #self.get_the_data(raion)
         self.data.to_csv(f"D:/DZ/Course_5/Курсовая/data/BDMO/{region}.csv")
 
-    def find_links(self, banned_words, num=None, path="//div[@id='WebTree']"):
+    def find_links(self, banned_words, num=None, path="//div[@id='WebTree']", settlement=None):
+        settlement_types = {"город ": "city", "городской округ ": "city", "муниципальный район": "not_city",
+                            "сельсовет": "not_city"}
         divs = self.driver.find_elements_by_xpath(path + "/div")
         div_id = [el.get_attribute("id") for el in divs]
         texts = [el.text.lower() for el in divs]
@@ -82,12 +84,18 @@ class RaionsPage:
                 count += 2
                 continue
             elif what_type is None:
-                self.links[texts[count-1]] = self.driver.find_element_by_xpath(
-                    path + f"/div[{count}]/a").get_attribute("href")
+                mapping = [True if i in texts[count-1] else False for i in settlement_types.keys()]
+                if sum(mapping) > 0:
+                    self.links[texts[count-1]] = (self.driver.find_element_by_xpath(
+                        path + f"/div[{count}]/a").get_attribute("href"), settlement_types[
+                        np.array(list(settlement_types.keys()))[mapping][0]])
+                else:
+                    self.links[texts[count - 1]] = (self.driver.find_element_by_xpath(
+                        path + f"/div[{count}]/a").get_attribute("href"), "Not defined")
             count += 1
 
     def choose_indicators(self, raion):
-        self.driver.get(self.links[raion])
+        self.driver.get(self.links[raion][0])
         years_boxes = np.array(self.driver.find_elements_by_xpath("//table[@id='yearlist']/tbody/tr/td/input"))
         years_texts = np.array([int(el.text) for el in self.driver.find_elements_by_xpath(
             "//table[@id='yearlist']/tbody/tr/td")])
@@ -171,7 +179,8 @@ class RaionsPage:
         #temp_data = pd.DataFrame({"years": years, "region": pd.Series(iter.repeat(self.region, len(years))),
         #                             "raion": pd.Series(iter.repeat(raion, len(years)))})
         temp_data = pd.DataFrame({**{"year": years, "region": pd.Series(iter.repeat(self.region, len(years))),
-                                     "raion": pd.Series(iter.repeat(raion, len(years)))},
+                                     "raion": pd.Series(iter.repeat(raion, len(years))),
+                                     "settlement_type": pd.Series(iter.repeat(self.links[raion][1], len(years)))},
                                   **{i: iter.repeat(np.NaN, len(years)) for i in self.indicators.keys()}})
         for ind in self.indicators.keys():
             if len(self.indicators[ind]) == 0:
@@ -256,7 +265,7 @@ class RaionsPage:
 if __name__ == "__main__":
     Container(regions=["Приморский край", "Амурская область", "Кировская область", "Липецкая область",
                        "Мурманская область", "Костромская область", "Республика Алтай", "Республика Марий Эл",
-                       "Хабаровский край", "Тульская область"],
+                       "Хабаровский край", "Тульская область", "Новгородская область"],
               indicators={
         "доля протяженности автодорог общего пользования местного значения, не отвечающих": {},
         "не имеющих регулярного автобусного": {},
