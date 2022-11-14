@@ -6,6 +6,7 @@ from selenium.webdriver import ChromeOptions
 import selenium.common.exceptions as sel_exc
 # разобраться с warning для Амурской области
 
+
 class Container:
 
     def __init__(self, regions, years, indicators):
@@ -20,7 +21,7 @@ class Container:
             self.initiate_process()
         finally:
             breakpoint()
-            self.data.to_csv("D:/DZ/Course_5/Курсовая/data/BDMO/overall.csv")
+            #self.data.to_csv("D:/DZ/Course_5/Курсовая/data/BDMO/overall.csv")
             self.driver.quit()
 
     def initiate_process(self):
@@ -59,7 +60,7 @@ class RaionsPage:
         for raion in self.links.keys():
             self.choose_indicators(raion)
             #self.get_the_data(raion)
-        self.data.to_csv(f"D:/DZ/Course_5/Курсовая/data/BDMO/{region}.csv")
+        self.data.to_csv(f"D:/DZ/Elections_database/data/BDMO/new_indicators_temp/{region}.csv")
 
     def find_links(self, banned_words, num=None, path="//div[@id='WebTree']"):
         divs = self.driver.find_elements_by_xpath(path + "/div")
@@ -144,6 +145,7 @@ class RaionsPage:
 
         data["indicator"] = pd.Series(iter.repeat("Not present", len(data)))
         temp_series = data.loc[(data["class"] == "pok") & (data["style"] == "absent"), "text"]
+        #temp_series = temp_series.str.replace("-", "")
         for g in temp_series.index:
             temp_series.loc[g] = np.array(list(self.indicators.keys()))[[
                 True if m in temp_series[g] else False for m in self.indicators.keys()]][0]
@@ -169,39 +171,60 @@ class RaionsPage:
         print("Done")
 
         years = pd.Series([el.text for el in self.driver.find_elements_by_xpath(
-                "//table[@class='passport' and position()=1]/tbody/tr[1]/th")[2:]], dtype="int")
+            "//table[@class='passport' and position()=1]/tbody/tr[1]/th")[2:]], dtype="int")
+
+        dict = {i:
+                    {j:
+                         {g:
+                              data.loc[(data.indicator == i) & (data.sub_indicator == j) &
+                                        (data.times == g)].iloc[0, 3:len(years)+3]
+                          for g in data.loc[(data.indicator == i) & (data.sub_indicator == j)].times.unique()}
+                     for j in data.loc[data.indicator == i].sub_indicator.unique()}
+                for i in data.indicator.unique()}
+
+        #for i in data.indicator.unique():
+        #    for j in data.loc[data.indicator == i].sub_indicator.unique():
+        #        for g in data.loc[(data.indicator == i) & (data.sub_indicator == j)].times.unique():
+        #            temp_g =
+
         #temp_data = pd.DataFrame({"years": years, "region": pd.Series(iter.repeat(self.region, len(years))),
         #                             "raion": pd.Series(iter.repeat(raion, len(years)))})
         temp_data = pd.DataFrame({**{"year": years, "region": pd.Series(iter.repeat(self.region, len(years))),
                                      "raion": pd.Series(iter.repeat(raion, len(years)))},
                                   **{i: iter.repeat(np.NaN, len(years)) for i in self.indicators.keys()}})
+        #for ind in self.indicators.keys():
+        #    try:
+        #        temp_ind = dict[ind]["Not present"]["Not present"]
+        #    except IndexError:
+        #        continue
+        #    if len(self.indicators[ind]) == 0:
+        #        temp_data[ind] = temp_ind
+        #    else:
+        #        for sub_ind in self.indicators[ind].keys():
+        #            temp_sub_ind = dict[ind][sub_ind]["Not present"]
+        #            temp_ind.loc[~pd.isnull(temp_sub_ind)] = temp_sub_ind.loc[~pd.isnull(temp_sub_ind)]
+        #            if len(self.indicators[ind][sub_ind]) == 0:
+        #                temp_data[ind] = temp_ind
+        #            else:
+        #                for t in self.indicators[ind][sub_ind].keys():
+        #                    temp_t = dict[ind][sub_ind][t]
+        #                    temp_ind.loc[~pd.isnull(temp_t)] = temp_t.loc[~pd.isnull(temp_t)]
+        #                    temp_data[ind] = temp_ind
+
         for ind in self.indicators.keys():
-            temp_ind = data.loc[(data["indicator"] == ind) & (data["sub_indicator"] == "Not present") &
-                                (data["times"] == "Not present")]
-            if len(self.indicators[ind]) == 0:
-                if len(temp_ind) != 0:
-                    temp_data[ind] = temp_ind.iloc[0, 3:len(years)+3].values
-                else:
-                    continue
-            else:
+            try:
+                temp_ind = dict[ind]["Not present"]["Not present"]
+            except KeyError:
+                continue
+            if len(self.indicators[ind]) != 0:
                 for sub_ind in self.indicators[ind].keys():
-                    temp_sub_ind = data.loc[
-                        (data["indicator"] == ind) & (data["sub_indicator"] == sub_ind) &
-                        (data["times"] == "Not present")]
-                    temp_ind.iloc[0, np.array(range(temp_ind.shape[1]))[~pd.isnull(temp_sub_ind).values[0]]] = temp_sub_ind.iloc[~pd.isnull(temp_sub_ind)]
-                    if len(self.indicators[ind][sub_ind]) == 0:
-                        if len(temp_ind) != 0:
-                            temp_data[ind] = temp_ind.iloc[0, 3:len(years) + 3].values
-                        else:
-                            continue
-                    else:
-                        for t in self.indicators[ind][sub_ind].keys():
-                            temp_t = data.loc[
-                                (data["indicator"] == ind) & (data["sub_indicator"] == sub_ind) &
-                                (data["times"] == t)]
-                            temp_ind.loc[~pd.isnull(temp_t.indicator)] = temp_t[~pd.isnull(temp_t.indicator)]
-                            if len(self.indicators[ind][sub_ind][t]) == 0 and len(temp_ind) != 0:
-                                temp_data[ind] = temp_ind.iloc[0, 3:len(years) + 3].values
+                    temp_sub_ind = dict[ind][sub_ind]["Not present"]
+                    temp_ind.loc[~pd.isnull(temp_sub_ind)] = temp_sub_ind.loc[~pd.isnull(temp_sub_ind)]
+                    if len(self.indicators[ind][sub_ind]) != 0:
+                        for t in self.indicators[ind][sub_ind]:
+                            temp_t = dict[ind][sub_ind][t]
+                            temp_ind.loc[~pd.isnull(temp_t)] = temp_t.loc[~pd.isnull(temp_t)]
+            temp_data[ind] = temp_ind.values
         self.data = self.data.append(temp_data)
 
 
@@ -261,21 +284,35 @@ class RaionsPage:
 
 
 if __name__ == "__main__":
-    Container(regions=["Приморский край", "Амурская область", "Кировская область", "Липецкая область",
-                       "Мурманская область", "Костромская область", "Республика Алтай", "Республика Марий Эл",
-                       "Хабаровский край", "Тульская область", "Новгородская область"],
+    Container(regions=["Приморский край"],
               indicators={
-        "доля протяженности автодорог общего пользования местного значения, не отвечающих": {},
-        "не имеющих регулярного автобусного": {},
-        "доля муниципальных дошкольных образовательных учреждений, здания которых находятся в аварийном состоянии": {},
-        "объем незавершенного в установленные сроки строительства": {},
-        "состоящего на учете в качестве нуждающегося в жилых помещениях": {},
-        "число спортивных сооружений": {},
-        "заменено и отремонтировано уличной газовой сети": {},
+        "общая протяженность улиц, проездов, набережных (на конец года)": {},
+        "общая протяженность освещенных частей улиц, проездов, набережных (на конец года)": {},
         "протяженность тепловых и паровых сетей, которые были заменены и отремонтированы": {},
-        "протяжение уличной канализационной сети, которая заменена": {},
-        "оценка численности населения": {"все население": {"на 1 января"}}},
+        "протяженность тепловых и паровых сетей в двух": {},
+        "одиночное протяжение уличной водопроводной сети, которая заменена и отремонтирована": {},
+        "одиночное протяжение уличной водопроводной сети": {"уличная водопроводная сеть": {}},
+        "одиночное протяжение уличной канализационной сети, которая заменена и отремонтирована": {},
+        "оценка численности населения": {"все население": {"на 1 января": {}}}},
               years=["2013", "2014", "2015", "2016", "2017", "2018", "2019", "2020", "2021", "2022"])
+
+
+#if __name__ == "__main__":
+#    Container(regions=["Приморский край", "Амурская область", "Кировская область", "Липецкая область",
+#                       "Мурманская область", "Костромская область", "Республика Алтай", "Республика Марий Эл",
+#                       "Хабаровский край", "Тульская область", "Новгородская область"],
+#              indicators={
+#        "доля протяженности автодорог общего пользования местного значения, не отвечающих": {},
+#        "не имеющих регулярного автобусного": {},
+#        "доля муниципальных дошкольных образовательных учреждений, здания которых находятся в аварийном состоянии": {},
+#        "объем незавершенного в установленные сроки строительства": {},
+#        "состоящего на учете в качестве нуждающегося в жилых помещениях": {},
+#        "число спортивных сооружений": {},
+#        "заменено и отремонтировано уличной газовой сети": {},
+#        "протяженность тепловых и паровых сетей, которые были заменены и отремонтированы": {},
+#        "протяжение уличной канализационной сети, которая заменена": {},
+#        "оценка численности населения": {"все население": {"на 1 января"}}},
+#              years=["2013", "2014", "2015", "2016", "2017", "2018", "2019", "2020", "2021", "2022"])
 
 # ["Приморский край", "Амурская область", "Кировская область", "Липецкая область", "Мурманская область",
 # "Костромская область", "Республика Алтай", "Республика Марий Эл", "Хабаровский край", "Тульская область"]
