@@ -126,12 +126,6 @@ class CollectTheData:
         self.my_click(self.driver, self.driver.find_element_by_xpath("//button[@type='submit']"),
                       wait=False, check_condition=False)
 
-    #def gather_info_about_elections(self):
-    #    self.my_click(self.driver, self.driver.find_element_by_xpath("//div[@class='main__menu']/div[2]/ul/div[1]/a"))
-    #    self.my_click(self.driver, self.driver.find_element_by_xpath("//a[@id='election-results-name']"))
-    #    menu_options = driver.find_elements_by_xpath("//div/div[9]/table/tbody/tr[@class='trReport']/td/a")
-
-
     @staticmethod
     def cartesian_product(*arrays):
         la = len(arrays)
@@ -163,7 +157,7 @@ class CollectTheData:
                 return
 
     @staticmethod
-    def dump_the_data(obj, output_dir, name):
+    def dump_the_data(obj, output_dir, name):  # dumps all of the data including one about candidates
         for i in ["prop_case", "maj_case"]:
             obj.cand_data[i].to_csv(f"{output_dir}{name}_cand_{i}.csv")
             obj.data[i].to_csv(f"{output_dir}{name}_{i}.csv")
@@ -277,7 +271,7 @@ class ElectionsPage:
         self.path = None
         self.start_point = None
         self.cand_data = {i: pd.DataFrame() for i in self.what_to_extract.keys()}
-        self.data = {i: pd.DataFrame() for i in self.what_to_extract.keys()}  # is there more beatiful way to create cont for data?
+        self.data = {i: pd.DataFrame() for i in self.what_to_extract.keys()}  # is there more beautiful way to create cont for data?
 
         with open("D:/DZ/Elections_database/Scripts_related_data/dicts/meta_data_dict.pkl", "rb") as inp:
             self.meta_data_dict = pickle.load(inp)
@@ -304,78 +298,82 @@ class ElectionsPage:
         else:
             self.path = "//div/ul/li/ul/li"
         CollectTheData.my_click(self.driver, self.driver.find_element_by_xpath("//a[@id='election-results-name']"))
-        menu_options = self.driver.find_elements_by_xpath("//div/div[9]/table/tbody/tr[@class='trReport']/td/a")
+        menu_options = self.driver.find_elements_by_xpath("//div/div[@id='election-results']/table/tbody/tr/td/a")
         if sum([True for i in [el.text for el in menu_options] if "единому" in i or "федеральному" in i]) > 0:
             self.presence["prop_case"] = True
         if sum([True for i in [el.text for el in menu_options] if "одномандат" in i]) > 0:
             self.presence["maj_case"] = True
 
     def get_cand_data(self):
-            # Do we need this try statement?
-            #try:
-            #    CollectTheData.my_get(self.driver,
-            #                          self.driver.find_element_by_xpath("//div/ul/li/a[2]").get_attribute("href"))
-            #except sel_exc.NoSuchElementException:
-            #    print("Didn't find overall button")
         CollectTheData.my_click(self.driver, self.driver.find_element_by_xpath("//a[@id='standard-reports-name']"))
         if self.what_to_extract["maj_case"] and self.presence["maj_case"]:
-            CollectTheData.my_click(self.driver, self.driver.find_element_by_xpath("//a[@id='220-rep-dir-link']"))
-            #CollectTheData.my_click(self.driver,
-            #                        self.driver.find_element_by_xpath("//div[@id='jstree_demo_div']/ul/li/a[2]"))
-            num_of_pages = int(self.driver.find_elements_by_xpath("//div[@class='pagin']/ul[1]/li")[-1].text)
-            maj_cand_data = pd.DataFrame()
-            for i in range(num_of_pages):
-                pages = self.driver.find_elements_by_xpath("//div[@class='pagin']/ul[1]/li")
-                needed_num = [j for j, el in enumerate(pages) if int(el.text) == i+1][0]
-                CollectTheData.my_click(self.driver, pages[needed_num])
-                html = self.driver.page_source
-                maj_cand_data = maj_cand_data.append(pd.read_html(html)[4].droplevel(0, 1).drop(
-                    columns=["№ п/п", "Unnamed: 8_level_1", "Unnamed: 9_level_1", "Выдвижение"]).iloc[3:, :])
-            maj_cand_data.rename(columns={"ФИО кандидата": "cand_names", "Дата рождения кандидата": "birth_dates",
-                                          "Субьект выдвижения": "nom_subject", "Номер округа": "county_num",
-                                          "Регистрация": "reg_status", "Избрание": "elec_status"}, inplace=True)
-            maj_cand_data = maj_cand_data.astype({"county_num": "int"})
-            maj_cand_data["reg_status"] = pd.Series(np.asarray(maj_cand_data["reg_status"]) == "зарегистрирован")
-            maj_cand_data["elec_status"] = pd.isnull(maj_cand_data["elec_status"])
-            self.cand_data["maj_case"] = maj_cand_data
+            self.get_cand_data_maj()
         if self.what_to_extract["prop_case"] and self.presence["prop_case"]:
-            CollectTheData.my_click(self.driver, self.driver.find_element_by_xpath("//a[@id='standard-reports-name']"))
-            options = self.driver.find_elements_by_xpath("//div[@id='standard-reports']/table/tbody/tr/td/a")
-            needed_option = [i for i, z in enumerate(options)
-                             if z.text ==
-                             "Список политических партий, их региональных отделений, принимающих участие в выборах"][0]
-            needed_link = [el.get_attribute("href") for el in options][needed_option]
+            self.get_cand_data_prop()
+
+    def get_cand_data_maj(self):
+        CollectTheData.my_click(self.driver, self.driver.find_element_by_xpath("//a[@id='220-rep-dir-link']"))
+        num_of_pages = int(self.driver.find_elements_by_xpath("//div[@class='pagin']/ul[1]/li")[-1].text)
+        maj_cand_data = pd.DataFrame()
+        for i in range(num_of_pages):
+            pages = self.driver.find_elements_by_xpath("//div[@class='pagin']/ul[1]/li")
+            needed_num = [j for j, el in enumerate(pages) if int(el.text) == i + 1][0]
+            CollectTheData.my_click(self.driver, pages[needed_num])
+            html = self.driver.page_source
+            temp_maj_cand_data = pd.read_html(html)[5].droplevel(0, 1).drop(
+                columns=["№ п/п", "Unnamed: 8_level_1", "Unnamed: 9_level_1", "Выдвижение"])  #5?
+            if sum(pd.isnull(temp_maj_cand_data.iloc[0, :])) == temp_maj_cand_data.shape[1]:
+                temp_maj_cand_data = temp_maj_cand_data.iloc[3:, :]  # необходимо проверять, правильно ли все удаляется
+            #if sum(pd.isnull(temp_maj_cand_data["Номер округа"])) > 0:
+            #    breakpoint()
+            maj_cand_data = maj_cand_data.append(temp_maj_cand_data)
+        with open("D:/DZ/Elections_database/Scripts_related_data/dicts/maj_cand_data_rename.pkl", "rb") as inp:
+            maj_cand_data.rename(columns=pickle.load(inp), inplace=True)
+        maj_cand_data = maj_cand_data.astype({"county_num": "int"})
+        maj_cand_data["reg_status"] = pd.Series(np.asarray(maj_cand_data["reg_status"]) == "зарегистрирован")
+        maj_cand_data["elec_status"] = ~pd.isnull(maj_cand_data["elec_status"])  # any candidate without NA is a winner
+        self.cand_data["maj_case"] = maj_cand_data
+
+    def get_cand_data_prop(self):
+        CollectTheData.my_click(self.driver, self.driver.find_element_by_xpath("//a[@id='standard-reports-name']"))
+        options = self.driver.find_elements_by_xpath("//div[@id='standard-reports']/table/tbody/tr/td/a")
+        needed_option = [i for i, z in enumerate(options)
+                         if z.text ==
+                         "Список политических партий, их региональных отделений, принимающих участие в выборах"][0]
+        needed_link = [el.get_attribute("href") for el in options][needed_option]
+        CollectTheData.my_get(self.driver, needed_link)
+        parties = self.driver.find_elements_by_xpath("//table[@id='politparty2']/tbody/tr/td[2]/form/a")
+        parties_name = [el.text for el in parties]
+        num_of_parties = len(parties)
+        prop_cand_data = pd.DataFrame()
+        for i in range(num_of_parties):
             CollectTheData.my_get(self.driver, needed_link)
-            parties = self.driver.find_elements_by_xpath("//table[@id='politparty2']/tbody/tr/td[2]/form/a")
-            parties_name = [el.text for el in parties]
-            num_of_parties = len(parties)
-            prop_cand_data = pd.DataFrame()
-            for i in range(num_of_parties):
-                CollectTheData.my_get(self.driver, needed_link)
-                CollectTheData.my_click(self.driver, self.driver.find_elements_by_xpath(
-                    "//table[@id='politparty2']/tbody/tr/td[2]/form/a")[i])
-                if len(self.driver.find_elements_by_xpath("//table[@id='candidates-220-1']/tbody/tr")) < 2:
-                    continue
-                html = self.driver.page_source
-                prop_cand_data = prop_cand_data.append(pd.read_html(html)[5].droplevel(0, 1).drop(
-                    columns=["№ п/п", "Unnamed: 9_level_1", "Unnamed: 10_level_1", "выдвижение"]).iloc[3:, :])
-                prop_cand_data["nom_subject"] = parties_name[i]
-            prop_cand_data.rename(columns={"ФИО кандидата": "cand_names", "Дата рождения кандидата": "birth_dates",
-                                           "регистрация": "reg_status", "избрание": "elec_status",
-                                           "Номер региональной группы": "num_of_regional_group",
-                                           "Общесубъектовая часть, региональная группа": "part_of_the_list",
-                                           "Номер в общесубъектовой части, региональной группе": "num_in_the_part"},
-                                  inplace=True)
-            prop_cand_data = prop_cand_data.astype({"num_of_regional_group": "int", "num_in_the_part": "int"})
-            prop_cand_data["reg_status"] = pd.Series(np.asarray(prop_cand_data["reg_status"]) == "зарегистрирован")
-            prop_cand_data["elec_status"] = pd.isnull(np.asarray(prop_cand_data["elec_status"]) == "избр.")
-            self.cand_data["prop_case"] = prop_cand_data
+            CollectTheData.my_click(self.driver, self.driver.find_elements_by_xpath(
+                "//table[@id='politparty2']/tbody/tr/td[2]/form/a")[i])
+            if len(self.driver.find_elements_by_xpath("//table[@id='candidates-220-1']/tbody/tr")) < 2:
+                continue
+            html = self.driver.page_source
+            temp_prop_cand_data = pd.read_html(html)[5].droplevel(0, 1).drop(
+                columns=["№ п/п", "Unnamed: 9_level_1", "Unnamed: 10_level_1", "выдвижение"]) #5?
+            temp_prop_cand_data["nom_subject"] = parties_name[i]
+            if sum(pd.isnull(temp_prop_cand_data.iloc[0, :])) > 2:
+                temp_prop_cand_data = temp_prop_cand_data.iloc[3:, :]  #необходимо проверять, правильно ли все удаляется
+            prop_cand_data = prop_cand_data.append(temp_prop_cand_data)
+        with open("D:/DZ/Elections_database/Scripts_related_data/dicts/prop_cand_data_rename.pkl", "rb") as inp:
+            prop_cand_data.rename(columns=pickle.load(inp), inplace=True)
+        prop_cand_data = prop_cand_data.astype({"num_of_regional_group": "int", "num_in_the_part": "int"})
+        prop_cand_data["reg_status"] = pd.Series(np.asarray(prop_cand_data["reg_status"]) == "зарегистрирован")
+        # only candidates with "избр." are winners
+        prop_cand_data["elec_status"] = prop_cand_data["elec_status"] == "избр."
+        self.cand_data["prop_case"] = prop_cand_data
 
     def get_elections_results(self):
         temp_data = {i: pd.DataFrame() for i in self.what_to_extract.keys()}
-        CollectTheData.my_click(self.driver, self.driver.find_element_by_xpath("//a[@id='election-results-name']"))
-        menu_options = self.driver.find_elements_by_xpath("//tbody/tr[@class='trReport']/td/a")
+        #CollectTheData.my_click(self.driver, self.driver.find_element_by_xpath("//a[@id='election-results-name']"))
+        #menu_options = self.driver.find_elements_by_xpath("//div[@id='election-results']/table/tbody/tr/td/a")
         for i in self.what_to_extract.keys():
+            CollectTheData.my_click(self.driver, self.driver.find_element_by_xpath("//a[@id='election-results-name']"))
+            menu_options = self.driver.find_elements_by_xpath("//div[@id='election-results']/table/tbody/tr/td/a")
             if self.presence[i] and self.what_to_extract[i]:
                 if i == "maj_case":
                     CollectTheData.my_click(self.driver, menu_options[[i for i, z in enumerate(
@@ -479,7 +477,7 @@ class ElectionsPage:
             html = self.driver.page_source
             temp_data = pd.read_html(html)[hyper_params["table_num"]].drop(columns=hyper_params["columns_to_drop"])
             if hyper_params["beforehand_del"]:
-                temp_data["Unnamed: 1"] = pd.read_html(html)[5].iloc[2:len(temp_data)+2, 1].reset_index(drop=True)
+                temp_data["Unnamed: 1"] = pd.read_html(html)[5].iloc[2:len(temp_data)+2, 1].reset_index(drop=True) # 5?
             temp_data.set_index("Unnamed: 1", inplace=True)
             temp_data = temp_data.transpose().reset_index(drop=False).rename(columns={"index": "uik"})
             if np.nan in temp_data.columns:
@@ -527,14 +525,6 @@ class ElectionsPage:
             self.data[i]["level"], self.data[i]["kind"] = condition[0], condition[1]
             self.data[i]["type_of_elections"], self.data[i]["electoral_system"] = condition[2], condition[3]
 
-    #def dump_the_data(self, output_dir):
-    #    self.cand_data["prop_case"], self.cand_data["maj_case"], self.data["prop_cse"] = self.convert_party_names(
-    #        data=[(self.cand_data["prop_case"], "nom_subject"), (self.cand_data["maj_case"], "nom_subject"),
-    #              (self.data["prop_cse"], "participant")])
-    #    for i in ["prop_case", "maj_case"]:
-    #        self.cand_data[i].to_csv(output_dir + " cand" + i + r".csv")
-    #        self.data[i].to_csv(output_dir + i + r".csv")
-
     def convert_party_names(self, data):
         for case in data:
             case[0] = self.find_aliases(case[0], case[1])
@@ -576,10 +566,15 @@ class ElectionsPage:
 
 
 if __name__ == "__main__":
-    CollectTheData(dates={"start_date": "01.09.2019", "end_date": "01.01.2020"},
+    CollectTheData(dates={"start_date": "01.09.2016", "end_date": "01.01.2021"},
                    regions=["Кабардино-Балкарская Республика"],
                    conditions={"level": np.array(["Региональный"]), "kind": np.array(["Выборы депутата"]),
                                "type_of_elections": np.array(["Основные"])},
                    driver_loc="D:/DZ/Python/Driver/chromedriver.exe",
                    output_dir="D:/DZ/Elections_database/data/Web_Scraping_Data/OOP_testing/",
-                   what_to_extract={"maj_case": True, "prop_case": True})
+                   what_to_extract={"maj_case": False, "prop_case": True})
+
+
+["Приморский край", "Амурская область", "Кировская область", "Липецкая область",
+                            "Мурманская область", "Новгородская область", "Костромская область", "Республика Алтай",
+                            "Республика Марий Эл", "Хабаровский край", "Тульская область"]
