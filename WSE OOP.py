@@ -92,7 +92,7 @@ class CollectTheData:
                     res.get_cand_data()
                     res.get_elections_results()
                     res.complete_the_data(region, condition)
-                    CollectTheData.dump_the_data(res, self.output_dir, region)
+                    CollectTheData.dump_the_data(res, self.output_dir, region, res.year)
                     for i in self.what_to_extract.keys():
                         self.cand_data[i] = self.cand_data[i].append(res.cand_data[i])
                         self.data[i] = self.data[i].append(res.data[i])
@@ -157,10 +157,10 @@ class CollectTheData:
                 return
 
     @staticmethod
-    def dump_the_data(obj, output_dir, name):  # dumps all of the data including one about candidates
+    def dump_the_data(obj, output_dir, name, year=""):  # dumps all of the data including one about candidates
         for i in ["prop_case", "maj_case"]:
-            obj.cand_data[i].to_csv(f"{output_dir}{name}_cand_{i}.csv")
-            obj.data[i].to_csv(f"{output_dir}{name}_{i}.csv")
+            obj.cand_data[i].to_csv(f"{output_dir}{name}_{year}_cand_{i}.csv")
+            obj.data[i].to_csv(f"{output_dir}{name}_{year}_{i}.csv")
 
 
 class CaptchaSolver:  # отделить ту часть, которая непосредственно связана с решением капчи, от кода, взаимодействующего с браузером
@@ -267,11 +267,12 @@ class ElectionsPage:
         self.dicts_dir = dicts_dir
         self.presence = {"maj_case": False, "prop_case": False}
         self.is_federal = True if condition[0] == "Федеральный" else False
-        self.year = None
+        self.year = ""
         self.path = None
         self.start_point = None
         self.cand_data = {i: pd.DataFrame() for i in self.what_to_extract.keys()}
         self.data = {i: pd.DataFrame() for i in self.what_to_extract.keys()}  # is there more beautiful way to create cont for data?
+        self.ic_href = None
 
         with open("D:/DZ/Elections_database/Scripts_related_data/dicts/meta_data_dict.pkl", "rb") as inp:
             self.meta_data_dict = pickle.load(inp)
@@ -292,11 +293,15 @@ class ElectionsPage:
                                     [el.text for el in self.driver.find_elements_by_xpath("//div/ul/li/ul/li/a[2]")])
                                 if z == cik_region_name][0] + "]"
             self.path = f"//div/ul/li/ul/li{fed_number}/ul/li"
-            CollectTheData.my_get(self.driver,
-                                  self.driver.find_element_by_xpath(
-                                      f"//div/ul/li/ul/li{fed_number}/a[2]").get_attribute("href"))
+            self.ic_href = self.driver.find_element_by_xpath(
+                f"//div/ul/li/ul/li{fed_number}/a[2]").get_attribute("href")
+            #CollectTheData.my_get(self.driver,
+            #                      self.driver.find_element_by_xpath(
+            #                          f"//div/ul/li/ul/li{fed_number}/a[2]").get_attribute("href"))
         else:
             self.path = "//div/ul/li/ul/li"
+            self.ic_href = self.driver.find_element_by_xpath(f"//div/ul/li/a[2]").get_attribute("href")
+        CollectTheData.my_get(self.driver, self.ic_href)
         CollectTheData.my_click(self.driver, self.driver.find_element_by_xpath("//a[@id='election-results-name']"))
         menu_options = self.driver.find_elements_by_xpath("//div/div[@id='election-results']/table/tbody/tr/td/a")
         if sum([True for i in [el.text for el in menu_options] if "единому" in i or "федеральному" in i]) > 0:
@@ -369,36 +374,35 @@ class ElectionsPage:
 
     def get_elections_results(self):
         temp_data = {i: pd.DataFrame() for i in self.what_to_extract.keys()}
+        if self.start_point is None:
+            self.get_the_start_point([el.text for el in self.driver.find_elements_by_xpath(self.path + "/a[2]")])
         #CollectTheData.my_click(self.driver, self.driver.find_element_by_xpath("//a[@id='election-results-name']"))
         #menu_options = self.driver.find_elements_by_xpath("//div[@id='election-results']/table/tbody/tr/td/a")
         for i in self.what_to_extract.keys():
-            CollectTheData.my_click(self.driver, self.driver.find_element_by_xpath("//a[@id='election-results-name']"))
-            menu_options = self.driver.find_elements_by_xpath("//div[@id='election-results']/table/tbody/tr/td/a")
+            local_path = self.path
+            CollectTheData.my_get(self.driver, self.ic_href)
             if self.presence[i] and self.what_to_extract[i]:
+                if self.start_point == 1 and i == "prop_case":
+                    CollectTheData.my_click(self.driver, self.driver.find_element_by_xpath(self.path + "[1]/a[2]"))
+                    CollectTheData.my_click(self.driver, self.driver.find_element_by_xpath(self.path + "[1]/a[1]"))
+                    local_path = local_path + "/ul/li"
+                CollectTheData.my_click(self.driver, self.driver.find_element_by_xpath("//a[@id='election-results-name']"))
+                menu_options = self.driver.find_elements_by_xpath("//div[@id='election-results']/table/tbody/tr/td/a")
                 if i == "maj_case":
                     CollectTheData.my_click(self.driver, menu_options[[i for i, z in enumerate(
                         [el.text for el in menu_options]) if "Сводная" in z and "одномандат" in z][0]])
                 else:
                     CollectTheData.my_click(self.driver, menu_options[[i for i, z in enumerate(
                         [el.text for el in menu_options]) if "Сводная" in z and (
-                            "едином" in z or "федеральному" in z)][0]])
-                counties_links = [county.get_attribute('href') for county in self.driver.find_elements_by_xpath(
-                    self.path + "/a[2]"
-                )]
+                            "едином" in z or "федеральному" in z or "единому" in z)][0]])
                 counties_text = [el.text for el in self.driver.find_elements_by_xpath(
-                    self.path + "/a[2]")]
-                if self.start_point is None:
-                    self.get_the_start_point(counties_text)
-                if self.start_point != 0 and i == "prop_case":
-                    counties_links = [el.get_attribute("href") for el in self.driver.find_elements_by_xpath(
-                        self.path + "ul/li/a[2]")]
-                    counties_nums = list(range(len(counties_links)))
-                    local_path = self.path + "ul/li/"
-                else:
-                    counties_nums = list(range(self.start_point, len(counties_text)))
-                    local_path = self.path
+                    local_path + "/a[2]")]
+                counties_links = [el.get_attribute("href") for el in self.driver.find_elements_by_xpath(
+                    local_path + "/a[2]")]
+                counties_nums = list(range(int(i == "maj_case")*self.start_point, len(counties_links)))
                 for county in counties_nums:
-                    func_output = self.scrap_data_off_county_page(counties_links[county], local_path=local_path)
+                    func_output = self.scrap_data_off_county_page(counties_links[county],
+                                                                  local_path=local_path + f"[{county + 1}]")
                     temp_data[i] = temp_data[i].append(self.clean_up_the_data(func_output, counties_text[county]))
                 temp_data[i]["region"] = self.region
                 temp_data[i].rename(columns=self.meta_data_dict, inplace=True)
@@ -452,7 +456,7 @@ class ElectionsPage:
                     "//tr[@class='text-left']/td[2]/div/table/tbody/tr/td")) != 0:
                 hyper_name = "prop"
             try:
-                with open("D:/DZ/Elections_database/Scripts_related_data/dicts/hyper_params_" + hyper_name + r".pkl",
+                with open("D:/DZ/Elections_database/Scripts_related_data/dicts/hyper_params_" + hyper_name + r"_2.pkl",
                           "rb") as inp:
                     hyper_params = pickle.load(inp)
             except TypeError:
@@ -475,7 +479,15 @@ class ElectionsPage:
             pass
         else:
             html = self.driver.page_source
-            temp_data = pd.read_html(html)[hyper_params["table_num"]].drop(columns=hyper_params["columns_to_drop"])
+            for table_num in hyper_params["table_num"]:
+                try:
+                    temp_data = pd.read_html(html)[table_num].drop(
+                        columns=hyper_params["columns_to_drop"])
+                except (IndexError, KeyError):
+                    continue
+                else:
+                    break
+            #temp_data = pd.read_html(html)[hyper_params["table_num"]].drop(columns=hyper_params["columns_to_drop"])
             if hyper_params["beforehand_del"]:
                 temp_data["Unnamed: 1"] = pd.read_html(html)[5].iloc[2:len(temp_data)+2, 1].reset_index(drop=True) # 5?
             temp_data.set_index("Unnamed: 1", inplace=True)
@@ -566,13 +578,13 @@ class ElectionsPage:
 
 
 if __name__ == "__main__":
-    CollectTheData(dates={"start_date": "01.09.2016", "end_date": "01.01.2021"},
-                   regions=["Кабардино-Балкарская Республика"],
+    CollectTheData(dates={"start_date": "01.01.2019", "end_date": "01.01.2022"},
+                   regions=["Республика Марий Эл", "Хабаровский край", "Тульская область"],
                    conditions={"level": np.array(["Региональный"]), "kind": np.array(["Выборы депутата"]),
                                "type_of_elections": np.array(["Основные"])},
                    driver_loc="D:/DZ/Python/Driver/chromedriver.exe",
                    output_dir="D:/DZ/Elections_database/data/Web_Scraping_Data/OOP_testing/",
-                   what_to_extract={"maj_case": False, "prop_case": True})
+                   what_to_extract={"maj_case": True, "prop_case": True})
 
 
 ["Приморский край", "Амурская область", "Кировская область", "Липецкая область",
